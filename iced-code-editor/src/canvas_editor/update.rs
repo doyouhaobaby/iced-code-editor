@@ -44,6 +44,17 @@ impl CodeEditor {
                     self.is_grouping = false;
                 }
 
+                // Check if there's a selection - if so, delete it instead
+                if self.selection_start.is_some()
+                    && self.selection_end.is_some()
+                {
+                    self.delete_selection();
+                    self.reset_cursor_blink();
+                    self.cache.clear();
+                    return self.scroll_to_cursor();
+                }
+
+                // No selection - perform normal backspace
                 let (line, col) = self.cursor;
                 let mut cmd = DeleteCharCommand::new(
                     &self.buffer,
@@ -65,6 +76,17 @@ impl CodeEditor {
                     self.is_grouping = false;
                 }
 
+                // Check if there's a selection - if so, delete it instead
+                if self.selection_start.is_some()
+                    && self.selection_end.is_some()
+                {
+                    self.delete_selection();
+                    self.reset_cursor_blink();
+                    self.cache.clear();
+                    return self.scroll_to_cursor();
+                }
+
+                // No selection - perform normal forward delete
                 let (line, col) = self.cursor;
                 let mut cmd = DeleteForwardCommand::new(
                     &self.buffer,
@@ -586,5 +608,73 @@ mod tests {
 
         let _ = editor.update(&Message::Redo);
         assert_eq!(editor.buffer.line(0), "abcd");
+    }
+
+    #[test]
+    fn test_delete_key_with_selection() {
+        let mut editor = CodeEditor::new("hello world", "py");
+        editor.selection_start = Some((0, 0));
+        editor.selection_end = Some((0, 5));
+        editor.cursor = (0, 5);
+
+        let _ = editor.update(&Message::Delete);
+
+        assert_eq!(editor.buffer.line(0), " world");
+        assert_eq!(editor.cursor, (0, 0));
+        assert_eq!(editor.selection_start, None);
+        assert_eq!(editor.selection_end, None);
+    }
+
+    #[test]
+    fn test_delete_key_without_selection() {
+        let mut editor = CodeEditor::new("hello", "py");
+        editor.cursor = (0, 0);
+
+        let _ = editor.update(&Message::Delete);
+
+        // Should delete the 'h'
+        assert_eq!(editor.buffer.line(0), "ello");
+        assert_eq!(editor.cursor, (0, 0));
+    }
+
+    #[test]
+    fn test_backspace_with_selection() {
+        let mut editor = CodeEditor::new("hello world", "py");
+        editor.selection_start = Some((0, 6));
+        editor.selection_end = Some((0, 11));
+        editor.cursor = (0, 11);
+
+        let _ = editor.update(&Message::Backspace);
+
+        assert_eq!(editor.buffer.line(0), "hello ");
+        assert_eq!(editor.cursor, (0, 6));
+        assert_eq!(editor.selection_start, None);
+        assert_eq!(editor.selection_end, None);
+    }
+
+    #[test]
+    fn test_backspace_without_selection() {
+        let mut editor = CodeEditor::new("hello", "py");
+        editor.cursor = (0, 5);
+
+        let _ = editor.update(&Message::Backspace);
+
+        // Should delete the 'o'
+        assert_eq!(editor.buffer.line(0), "hell");
+        assert_eq!(editor.cursor, (0, 4));
+    }
+
+    #[test]
+    fn test_delete_multiline_selection() {
+        let mut editor = CodeEditor::new("line1\nline2\nline3", "py");
+        editor.selection_start = Some((0, 2));
+        editor.selection_end = Some((2, 2));
+        editor.cursor = (2, 2);
+
+        let _ = editor.update(&Message::Delete);
+
+        assert_eq!(editor.buffer.line(0), "line3");
+        assert_eq!(editor.cursor, (0, 2));
+        assert_eq!(editor.selection_start, None);
     }
 }

@@ -91,9 +91,9 @@
 //!
 //! | Shortcut | Action |
 //! |----------|--------|
-//! | **Backspace** | Delete character before cursor |
-//! | **Delete** | Delete character after cursor |
-//! | **Shift + Delete** | Delete selected text |
+//! | **Backspace** | Delete character before cursor (or delete selection if text is selected) |
+//! | **Delete** | Delete character after cursor (or delete selection if text is selected) |
+//! | **Shift + Delete** | Delete selected text (same as Delete when selection exists) |
 //! | **Enter** | Insert new line |
 //!
 //! ## Clipboard
