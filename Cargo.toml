@@ -5,6 +5,10 @@ members = [
     "demo-app",
 ]
 
+default-members = [
+    "iced-code-editor",
+]
+
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
@@ -16,7 +20,6 @@ authors = ["LuDog71 <ludog71.trekker238@passmail.net>"]
 iced = { version = "0.14", features = ["advanced", "highlighter", "canvas"] }
 
 [profile.release]
-# the resulting binary is small as possible
 panic = 'abort'
 
 [workspace.lints.rust]

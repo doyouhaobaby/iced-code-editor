@@ -7,6 +7,7 @@ A high-performance, canvas-based code editor widget for [Iced](https://github.co
 [![Crates.io](https://img.shields.io/crates/v/iced-code-editor.svg)](https://crates.io/crates/iced-code-editor)
 [![Documentation](https://docs.rs/iced-code-editor/badge.svg)](https://docs.rs/iced-code-editor)
 [![License](https://img.shields.io/crates/l/iced-code-editor.svg)](LICENSE)
+[![Downloads](https://img.shields.io/crates/d/iced-code-editor.svg)](https://crates.io/crates/iced-code-editor)
 
 </div>
 
@@ -112,12 +113,12 @@ The editor supports a comprehensive set of keyboard shortcuts:
 
 ### Editing
 
-| Shortcut           | Action                                                                        |
-| ------------------ | ----------------------------------------------------------------------------- |
-| **Backspace**      | Delete character before cursor (or delete selection if text is selected)     |
-| **Delete**         | Delete character after cursor (or delete selection if text is selected)      |
-| **Shift + Delete** | Delete selected text (same as Delete when selection exists)                  |
-| **Enter**          | Insert new line                                                               |
+| Shortcut           | Action                                                                   |
+| ------------------ | ------------------------------------------------------------------------ |
+| **Backspace**      | Delete character before cursor (or delete selection if text is selected) |
+| **Delete**         | Delete character after cursor (or delete selection if text is selected)  |
+| **Shift + Delete** | Delete selected text (same as Delete when selection exists)              |
+| **Enter**          | Insert new line                                                          |
 
 ### Clipboard
 
@@ -223,7 +224,7 @@ A full-featured demo application is included in the `demo-app` directory, showca
 Run it with:
 
 ```bash
-cargo run --release --package demo-app
+cargo run --package demo-app --release
 ```
 
 ## Contributing
