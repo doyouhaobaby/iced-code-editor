@@ -7,22 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- Delete key now deletes text selection when text is selected
-- Backspace key now deletes text selection when text is selected
-- Background color changes when switching themes in demo app
-- Comprehensive keyboard shortcuts documentation
+None
 
-### Changed
-- Updated documentation to reflect new deletion behavior
-- Demo app background now properly matches selected theme
-
-### Fixed
-- Doctest compilation error in `CommandHistory::new`
-
-## [0.2.0] - 2024-12-19
+## [0.2.0] - 2025-12-19
 
 ### Added
+
 - Initial release on crates.io
 - Canvas-based high-performance code editor widget
 - Syntax highlighting for multiple programming languages (Python, Lua, Rust, JavaScript, etc.)
@@ -44,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Demo application with file operations
 
 ### Documentation
+
 - Complete README with examples and usage guide
 - Inline documentation for all public APIs
 - Working doctests for all examples
