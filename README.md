@@ -1,6 +1,6 @@
 # Iced Code Editor
 
-A custom code editor widget for the Iced GUI framework with syntax highlighting, line numbers, and scrolling support.
+A custom code editor widget for the Iced GUI framework with syntax highlighting, line numbers.
 
 Features:
 

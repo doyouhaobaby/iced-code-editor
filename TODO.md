@@ -2,6 +2,8 @@
 
 ## Fix
 
+Nettoie les fichiers/le code inutilisé. Refactorise si nécessaire. Ecris des tests unitaires si nécessaire.
+
 En terme de norme de codage, est ce que l'on est conforme à la crate iced ? Suit-on les memes règles ?
 
 Splitte le fichier iced-code-editor/src/component.rs pour améliorer la lisibilité.
@@ -24,3 +26,4 @@ Comment je fais si je veux publier mon widget dans crates.io
 [ ] Line wrapping
 [ ] Minimap (VS Code style)
 [ ] Theme selection (light/dark modes)
+[ ] Intergation with Iced theme

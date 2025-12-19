@@ -6,8 +6,10 @@
 use iced::mouse;
 use iced::widget::canvas::{self, Canvas, Geometry};
 use iced::widget::operation::scroll_to;
-use iced::widget::{Id, Scrollable, scrollable};
-use iced::{Color, Element, Event, Length, Point, Rectangle, Size, Task, Theme, keyboard};
+use iced::widget::{Id, Scrollable, container, scrollable};
+use iced::{
+    Border, Color, Element, Event, Length, Point, Rectangle, Shadow, Size, Task, Theme, keyboard,
+};
 use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
@@ -44,6 +46,10 @@ pub struct CanvasEditor {
     cursor_visible: bool,
     /// Selection start (if any)
     selection_start: Option<(usize, usize)>,
+    /// Selection end (if any) - cursor position during selection
+    selection_end: Option<(usize, usize)>,
+    /// Mouse is currently dragging for selection
+    is_dragging: bool,
     /// Cache for canvas rendering
     cache: canvas::Cache,
     /// Scrollable ID for programmatic scrolling
@@ -65,20 +71,28 @@ pub enum CanvasEditorMessage {
     Delete,
     /// Enter pressed
     Enter,
-    /// Arrow key pressed
-    ArrowKey(ArrowDirection),
+    /// Arrow key pressed (direction, shift_pressed)
+    ArrowKey(ArrowDirection, bool),
     /// Mouse clicked at position
     MouseClick(Point),
+    /// Mouse drag for selection
+    MouseDrag(Point),
+    /// Mouse released
+    MouseRelease,
+    /// Copy selected text (Ctrl+C)
+    Copy,
+    /// Paste text from clipboard (Ctrl+V)
+    Paste(String),
     /// Request redraw for cursor blink
     Tick,
     /// Page Up pressed
     PageUp,
     /// Page Down pressed
     PageDown,
-    /// Home key pressed (move to start of line)
-    Home,
-    /// End key pressed (move to end of line)
-    End,
+    /// Home key pressed (move to start of line, shift_pressed)
+    Home(bool),
+    /// End key pressed (move to end of line, shift_pressed)
+    End(bool),
     /// Viewport scrolled - track scroll position
     Scrolled(scrollable::Viewport),
 }
@@ -114,6 +128,8 @@ impl CanvasEditor {
             last_blink: Instant::now(),
             cursor_visible: true,
             selection_start: None,
+            selection_end: None,
+            is_dragging: false,
             cache: canvas::Cache::default(),
             scrollable_id: Id::unique(),
             viewport_scroll: 0.0,
@@ -170,15 +186,57 @@ impl CanvasEditor {
                 self.cache.clear();
                 self.scroll_to_cursor()
             }
-            CanvasEditorMessage::ArrowKey(direction) => {
-                self.move_cursor(*direction);
+            CanvasEditorMessage::ArrowKey(direction, shift_pressed) => {
+                if *shift_pressed {
+                    // Start selection if not already started
+                    if self.selection_start.is_none() {
+                        self.selection_start = Some(self.cursor);
+                    }
+                    self.move_cursor(*direction);
+                    self.selection_end = Some(self.cursor);
+                } else {
+                    // Clear selection and move cursor
+                    self.clear_selection();
+                    self.move_cursor(*direction);
+                }
                 self.reset_cursor_blink();
+                self.cache.clear();
                 self.scroll_to_cursor()
             }
             CanvasEditorMessage::MouseClick(point) => {
                 self.handle_mouse_click(*point);
                 self.reset_cursor_blink();
+                // Clear selection on click
+                self.clear_selection();
+                self.is_dragging = true;
+                self.selection_start = Some(self.cursor);
                 Task::none()
+            }
+            CanvasEditorMessage::MouseDrag(point) => {
+                if self.is_dragging {
+                    self.handle_mouse_drag(*point);
+                    self.cache.clear();
+                }
+                Task::none()
+            }
+            CanvasEditorMessage::MouseRelease => {
+                self.is_dragging = false;
+                Task::none()
+            }
+            CanvasEditorMessage::Copy => self.copy_selection(),
+            CanvasEditorMessage::Paste(text) => {
+                // If text is empty, we need to read from clipboard
+                if text.is_empty() {
+                    // Return a task that reads clipboard and chains to paste
+                    iced::clipboard::read().and_then(|clipboard_text| {
+                        Task::done(CanvasEditorMessage::Paste(clipboard_text))
+                    })
+                } else {
+                    // We have the text, paste it
+                    self.paste_text(text);
+                    self.cache.clear();
+                    self.scroll_to_cursor()
+                }
             }
             CanvasEditorMessage::Tick => {
                 // Handle cursor blinking
@@ -199,16 +257,39 @@ impl CanvasEditor {
                 self.reset_cursor_blink();
                 self.scroll_to_cursor()
             }
-            CanvasEditorMessage::Home => {
-                self.cursor.1 = 0;
+            CanvasEditorMessage::Home(shift_pressed) => {
+                if *shift_pressed {
+                    // Start selection if not already started
+                    if self.selection_start.is_none() {
+                        self.selection_start = Some(self.cursor);
+                    }
+                    self.cursor.1 = 0; // Move to start of line
+                    self.selection_end = Some(self.cursor);
+                } else {
+                    // Clear selection and move cursor
+                    self.clear_selection();
+                    self.cursor.1 = 0;
+                }
                 self.reset_cursor_blink();
                 self.cache.clear();
                 Task::none()
             }
-            CanvasEditorMessage::End => {
+            CanvasEditorMessage::End(shift_pressed) => {
                 let line = self.cursor.0;
                 let line_len = self.buffer.line_len(line);
-                self.cursor.1 = line_len;
+
+                if *shift_pressed {
+                    // Start selection if not already started
+                    if self.selection_start.is_none() {
+                        self.selection_start = Some(self.cursor);
+                    }
+                    self.cursor.1 = line_len; // Move to end of line
+                    self.selection_end = Some(self.cursor);
+                } else {
+                    // Clear selection and move cursor
+                    self.clear_selection();
+                    self.cursor.1 = line_len;
+                }
                 self.reset_cursor_blink();
                 self.cache.clear();
                 Task::none()
@@ -346,6 +427,162 @@ impl CanvasEditor {
         self.cache.clear();
     }
 
+    /// Handles mouse drag for text selection.
+    fn handle_mouse_drag(&mut self, point: Point) {
+        // Account for gutter width
+        if point.x < GUTTER_WIDTH {
+            return;
+        }
+
+        // Calculate line and column (same as mouse click)
+        let line = ((point.y + self.scroll_offset) / LINE_HEIGHT) as usize;
+        let line = line.min(self.buffer.line_count().saturating_sub(1));
+
+        let x_in_text = point.x - GUTTER_WIDTH;
+        let col = (x_in_text / CHAR_WIDTH) as usize;
+        let line_len = self.buffer.line_len(line);
+        let col = col.min(line_len);
+
+        // Update cursor and selection end
+        self.cursor = (line, col);
+        self.selection_end = Some(self.cursor);
+    }
+
+    /// Clears the current selection.
+    fn clear_selection(&mut self) {
+        self.selection_start = None;
+        self.selection_end = None;
+        self.cache.clear();
+    }
+
+    /// Returns the selected text range in normalized order (start before end).
+    fn get_selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
+        if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
+            // Normalize: ensure start comes before end
+            if start.0 < end.0 || (start.0 == end.0 && start.1 < end.1) {
+                Some((start, end))
+            } else {
+                Some((end, start))
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Returns the selected text as a string.
+    fn get_selected_text(&self) -> Option<String> {
+        let (start, end) = self.get_selection_range()?;
+
+        if start == end {
+            return None; // No selection
+        }
+
+        let mut result = String::new();
+
+        if start.0 == end.0 {
+            // Single line selection
+            let line = self.buffer.line(start.0);
+            result.push_str(&line[start.1..end.1]);
+        } else {
+            // Multi-line selection
+            // First line
+            let first_line = self.buffer.line(start.0);
+            result.push_str(&first_line[start.1..]);
+            result.push('\n');
+
+            // Middle lines
+            for line_idx in (start.0 + 1)..end.0 {
+                result.push_str(self.buffer.line(line_idx));
+                result.push('\n');
+            }
+
+            // Last line
+            let last_line = self.buffer.line(end.0);
+            result.push_str(&last_line[..end.1]);
+        }
+
+        Some(result)
+    }
+
+    /// Copies selected text to clipboard.
+    fn copy_selection(&self) -> Task<CanvasEditorMessage> {
+        if let Some(text) = self.get_selected_text() {
+            iced::clipboard::write(text)
+        } else {
+            Task::none()
+        }
+    }
+
+    /// Deletes the selected text.
+    fn delete_selection(&mut self) {
+        if let Some((start, end)) = self.get_selection_range() {
+            if start == end {
+                return; // No selection
+            }
+
+            // Delete character by character from end to start
+            // This is simpler than implementing range deletion in TextBuffer
+            for line_idx in (start.0..=end.0).rev() {
+                if line_idx == start.0 && line_idx == end.0 {
+                    // Single line selection
+                    for _ in start.1..end.1 {
+                        self.buffer.delete_forward(start.0, start.1);
+                    }
+                } else if line_idx == start.0 {
+                    // First line - delete from start to end of line
+                    let line_len = self.buffer.line_len(line_idx);
+                    for _ in start.1..line_len {
+                        self.buffer.delete_forward(line_idx, start.1);
+                    }
+                    // Delete newline
+                    if line_idx < self.buffer.line_count() {
+                        self.buffer.delete_forward(line_idx, start.1);
+                    }
+                } else if line_idx == end.0 {
+                    // Last line - delete from start to end position
+                    for _ in 0..end.1 {
+                        self.buffer.delete_forward(start.0, start.1);
+                    }
+                } else {
+                    // Middle line - delete entire line
+                    let line_len = self.buffer.line_len(start.0);
+                    for _ in 0..line_len {
+                        self.buffer.delete_forward(start.0, start.1);
+                    }
+                    // Delete newline
+                    if start.0 < self.buffer.line_count() {
+                        self.buffer.delete_forward(start.0, start.1);
+                    }
+                }
+            }
+
+            // Move cursor to selection start
+            self.cursor = start;
+            self.clear_selection();
+        }
+    }
+
+    /// Pastes text from clipboard at cursor position.
+    fn paste_text(&mut self, text: &str) {
+        // If there's a selection, delete it first
+        if self.selection_start.is_some() && self.selection_end.is_some() {
+            self.delete_selection();
+        }
+
+        // Insert text character by character
+        for ch in text.chars() {
+            if ch == '\n' {
+                let (line, col) = self.cursor;
+                self.buffer.insert_newline(line, col);
+                self.cursor = (line + 1, 0);
+            } else {
+                let (line, col) = self.cursor;
+                self.buffer.insert_char(line, col, ch);
+                self.cursor.1 += 1;
+            }
+        }
+    }
+
     /// Returns the editor content as a string.
     #[must_use]
     pub fn content(&self) -> String {
@@ -363,12 +600,58 @@ impl CanvasEditor {
             .width(Length::Fill)
             .height(Length::Fixed(content_height));
 
-        // Wrap in scrollable for automatic scrollbar display
+        // Capture theme colors for the scrollbar style closure
+        let scrollbar_bg = self.theme.scrollbar_background;
+        let scroller_color = self.theme.scroller_color;
+
+        // Wrap in scrollable for automatic scrollbar display with custom style
         Scrollable::new(canvas)
             .id(self.scrollable_id.clone())
             .width(Length::Fill)
             .height(Length::Fill)
             .on_scroll(CanvasEditorMessage::Scrolled)
+            .style(move |_theme, _status| scrollable::Style {
+                container: container::Style::default(),
+                vertical_rail: scrollable::Rail {
+                    background: Some(scrollbar_bg.into()),
+                    border: Border {
+                        radius: 4.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    scroller: scrollable::Scroller {
+                        background: scroller_color.into(),
+                        border: Border {
+                            radius: 4.0.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                    },
+                },
+                horizontal_rail: scrollable::Rail {
+                    background: Some(scrollbar_bg.into()),
+                    border: Border {
+                        radius: 4.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    scroller: scrollable::Scroller {
+                        background: scroller_color.into(),
+                        border: Border {
+                            radius: 4.0.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                    },
+                },
+                gap: None,
+                auto_scroll: scrollable::AutoScroll {
+                    background: Color::TRANSPARENT.into(),
+                    border: Border::default(),
+                    shadow: Shadow::default(),
+                    icon: Color::TRANSPARENT,
+                },
+            })
             .into()
     }
 }
@@ -477,6 +760,69 @@ impl canvas::Program<CanvasEditorMessage> for CanvasEditor {
                 }
             }
 
+            // Draw selection highlight
+            if let Some((start, end)) = self.get_selection_range() {
+                if start == end {
+                    // No selection, do nothing
+                } else {
+                    let selection_color = Color {
+                        r: 0.3,
+                        g: 0.5,
+                        b: 0.8,
+                        a: 0.3,
+                    };
+
+                    if start.0 == end.0 {
+                        // Single line selection
+                        let y = start.0 as f32 * LINE_HEIGHT;
+                        let x_start = GUTTER_WIDTH + 5.0 + start.1 as f32 * CHAR_WIDTH;
+                        let x_end = GUTTER_WIDTH + 5.0 + end.1 as f32 * CHAR_WIDTH;
+
+                        frame.fill_rectangle(
+                            Point::new(x_start, y + 2.0),
+                            Size::new(x_end - x_start, LINE_HEIGHT - 4.0),
+                            selection_color,
+                        );
+                    } else {
+                        // Multi-line selection
+                        // First line - from start column to end of line
+                        let y_start = start.0 as f32 * LINE_HEIGHT;
+                        let x_start = GUTTER_WIDTH + 5.0 + start.1 as f32 * CHAR_WIDTH;
+                        let first_line_len = self.buffer.line_len(start.0);
+                        let x_end_first = GUTTER_WIDTH + 5.0 + first_line_len as f32 * CHAR_WIDTH;
+
+                        frame.fill_rectangle(
+                            Point::new(x_start, y_start + 2.0),
+                            Size::new(x_end_first - x_start, LINE_HEIGHT - 4.0),
+                            selection_color,
+                        );
+
+                        // Middle lines - full width
+                        for line_idx in (start.0 + 1)..end.0 {
+                            let y = line_idx as f32 * LINE_HEIGHT;
+                            let line_len = self.buffer.line_len(line_idx);
+                            let width = line_len as f32 * CHAR_WIDTH;
+
+                            frame.fill_rectangle(
+                                Point::new(GUTTER_WIDTH + 5.0, y + 2.0),
+                                Size::new(width, LINE_HEIGHT - 4.0),
+                                selection_color,
+                            );
+                        }
+
+                        // Last line - from start of line to end column
+                        let y_end = end.0 as f32 * LINE_HEIGHT;
+                        let x_end = GUTTER_WIDTH + 5.0 + end.1 as f32 * CHAR_WIDTH;
+
+                        frame.fill_rectangle(
+                            Point::new(GUTTER_WIDTH + 5.0, y_end + 2.0),
+                            Size::new(x_end - (GUTTER_WIDTH + 5.0), LINE_HEIGHT - 4.0),
+                            selection_color,
+                        );
+                    }
+                }
+            }
+
             // Draw cursor
             if self.cursor_visible {
                 let cursor_x = GUTTER_WIDTH + 5.0 + self.cursor.1 as f32 * CHAR_WIDTH;
@@ -501,11 +847,24 @@ impl canvas::Program<CanvasEditorMessage> for CanvasEditor {
         cursor: mouse::Cursor,
     ) -> Option<Action<CanvasEditorMessage>> {
         match event {
-            Event::Keyboard(keyboard::Event::KeyPressed {
-                key, modifiers: _, ..
-            }) => {
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                // Handle Ctrl+C (copy)
+                if modifiers.control()
+                    && matches!(key, keyboard::Key::Character(c) if c.as_str() == "c")
+                {
+                    return Some(Action::publish(CanvasEditorMessage::Copy).and_capture());
+                }
+
+                // Handle Ctrl+V (paste) - read clipboard and send paste message
+                if modifiers.control()
+                    && matches!(key, keyboard::Key::Character(v) if v.as_str() == "v")
+                {
+                    // Return an action that requests clipboard read
+                    return Some(Action::publish(CanvasEditorMessage::Paste(String::new())));
+                }
+
                 let message = match key {
-                    keyboard::Key::Character(c) => {
+                    keyboard::Key::Character(c) if !modifiers.control() => {
                         c.chars().next().map(CanvasEditorMessage::CharacterInput)
                     }
                     keyboard::Key::Named(keyboard::key::Named::Backspace) => {
@@ -517,18 +876,18 @@ impl canvas::Program<CanvasEditorMessage> for CanvasEditor {
                     keyboard::Key::Named(keyboard::key::Named::Enter) => {
                         Some(CanvasEditorMessage::Enter)
                     }
-                    keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
-                        Some(CanvasEditorMessage::ArrowKey(ArrowDirection::Up))
-                    }
-                    keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
-                        Some(CanvasEditorMessage::ArrowKey(ArrowDirection::Down))
-                    }
-                    keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
-                        Some(CanvasEditorMessage::ArrowKey(ArrowDirection::Left))
-                    }
-                    keyboard::Key::Named(keyboard::key::Named::ArrowRight) => {
-                        Some(CanvasEditorMessage::ArrowKey(ArrowDirection::Right))
-                    }
+                    keyboard::Key::Named(keyboard::key::Named::ArrowUp) => Some(
+                        CanvasEditorMessage::ArrowKey(ArrowDirection::Up, modifiers.shift()),
+                    ),
+                    keyboard::Key::Named(keyboard::key::Named::ArrowDown) => Some(
+                        CanvasEditorMessage::ArrowKey(ArrowDirection::Down, modifiers.shift()),
+                    ),
+                    keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => Some(
+                        CanvasEditorMessage::ArrowKey(ArrowDirection::Left, modifiers.shift()),
+                    ),
+                    keyboard::Key::Named(keyboard::key::Named::ArrowRight) => Some(
+                        CanvasEditorMessage::ArrowKey(ArrowDirection::Right, modifiers.shift()),
+                    ),
                     keyboard::Key::Named(keyboard::key::Named::PageUp) => {
                         Some(CanvasEditorMessage::PageUp)
                     }
@@ -536,10 +895,10 @@ impl canvas::Program<CanvasEditorMessage> for CanvasEditor {
                         Some(CanvasEditorMessage::PageDown)
                     }
                     keyboard::Key::Named(keyboard::key::Named::Home) => {
-                        Some(CanvasEditorMessage::Home)
+                        Some(CanvasEditorMessage::Home(modifiers.shift()))
                     }
                     keyboard::Key::Named(keyboard::key::Named::End) => {
-                        Some(CanvasEditorMessage::End)
+                        Some(CanvasEditorMessage::End(modifiers.shift()))
                     }
                     _ => None,
                 };
@@ -551,6 +910,15 @@ impl canvas::Program<CanvasEditorMessage> for CanvasEditor {
                     // Don't capture the event so it can bubble up for focus management
                     Action::publish(CanvasEditorMessage::MouseClick(position))
                 })
+            }
+            Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                // Handle mouse drag for selection
+                cursor.position_in(bounds).map(|position| {
+                    Action::publish(CanvasEditorMessage::MouseDrag(position)).and_capture()
+                })
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                Some(Action::publish(CanvasEditorMessage::MouseRelease).and_capture())
             }
             _ => None,
         }
@@ -580,7 +948,7 @@ mod tests {
     fn test_home_key() {
         let mut editor = CanvasEditor::new("hello world", "py");
         editor.cursor = (0, 5); // Move to middle of line
-        let _ = editor.update(&CanvasEditorMessage::Home);
+        let _ = editor.update(&CanvasEditorMessage::Home(false));
         assert_eq!(editor.cursor, (0, 0));
     }
 
@@ -588,7 +956,7 @@ mod tests {
     fn test_end_key() {
         let mut editor = CanvasEditor::new("hello world", "py");
         editor.cursor = (0, 0);
-        let _ = editor.update(&CanvasEditorMessage::End);
+        let _ = editor.update(&CanvasEditorMessage::End(false));
         assert_eq!(editor.cursor, (0, 11)); // Length of "hello world"
     }
 
