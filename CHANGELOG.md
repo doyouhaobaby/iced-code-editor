@@ -9,7 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 None
 
+## [0.2.3] - 2025-12-19
+
+### Fixes
+
+- Fix example code in README & lib
+
 ## [0.2.2] - 2025-12-19
+
+### Fixes
 
 - Fix GitHub repository link in Cargo.toml
 
@@ -53,6 +61,3 @@ None
 - Inline documentation for all public APIs
 - Working doctests for all examples
 - Keyboard shortcuts reference
-
-[Unreleased]: https://github.com/LuDog71FR/iced_code_editor/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/LuDog71FR/iced_code_editor/releases/tag/v0.2.0

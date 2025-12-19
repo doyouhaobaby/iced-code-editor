@@ -17,44 +17,48 @@
 //! # Example
 //!
 //! ```no_run
-//! use iced::widget::Column;
+//! use iced::widget::container;
 //! use iced::{Element, Task};
-//! use iced_code_editor::{CodeEditor, Message};
+//! use iced_code_editor::{CodeEditor, Message as EditorMessage};
 //!
-//! struct App {
+//! struct MyApp {
 //!     editor: CodeEditor,
 //! }
 //!
 //! #[derive(Debug, Clone)]
-//! enum AppMessage {
-//!     EditorAction(Message),
+//! enum Message {
+//!     EditorEvent(EditorMessage),
 //! }
 //!
-//! impl App {
-//!     fn new() -> (Self, Task<AppMessage>) {
-//!         (
-//!             Self {
-//!                 editor: CodeEditor::new("fn main() {}", "rs"),
-//!             },
-//!             Task::none(),
-//!         )
-//!     }
+//! impl Default for MyApp {
+//!     fn default() -> Self {
+//!         let code = r#"fn main() {
+//!     println!("Hello, world!");
+//! }
+//! "#;
 //!
-//!     fn update(&mut self, message: AppMessage) -> Task<AppMessage> {
+//!         Self { editor: CodeEditor::new(code, "rust") }
+//!     }
+//! }
+//!
+//! impl MyApp {
+//!     fn update(&mut self, message: Message) -> Task<Message> {
 //!         match message {
-//!             AppMessage::EditorAction(action) => {
-//!                 self.editor
-//!                     .update(&action)
-//!                     .map(AppMessage::EditorAction)
+//!             Message::EditorEvent(event) => {
+//!                 self.editor.update(&event).map(Message::EditorEvent)
 //!             }
 //!         }
 //!     }
 //!
-//!     fn view(&self) -> Element<AppMessage> {
-//!         Column::new()
-//!             .push(self.editor.view().map(AppMessage::EditorAction))
+//!     fn view(&self) -> Element<'_, Message> {
+//!         container(self.editor.view().map(Message::EditorEvent))
+//!             .padding(20)
 //!             .into()
 //!     }
+//! }
+//!
+//! fn main() -> iced::Result {
+//!     iced::run(MyApp::update, MyApp::view)
 //! }
 //! ```
 //!
