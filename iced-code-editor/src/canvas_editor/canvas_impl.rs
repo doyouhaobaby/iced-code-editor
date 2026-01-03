@@ -52,9 +52,12 @@ impl canvas::Program<Message> for CodeEditor {
                 "py" | "python" => syntax_set.find_syntax_by_extension("py"),
                 "lua" => syntax_set.find_syntax_by_extension("lua"),
                 "rs" | "rust" => syntax_set.find_syntax_by_extension("rs"),
-                "js" | "javascript" => {
-                    syntax_set.find_syntax_by_extension("js")
-                }
+                "js" | "javascript" => syntax_set.find_syntax_by_extension("js"),
+                "html" | "htm" => syntax_set.find_syntax_by_extension("html"),
+                "xml" | "svg" => syntax_set.find_syntax_by_extension("xml"),
+                "css" => syntax_set.find_syntax_by_extension("css"),
+                "json" => syntax_set.find_syntax_by_extension("json"),
+                "md" | "markdown" => syntax_set.find_syntax_by_extension("md"),
                 _ => Some(syntax_set.find_syntax_plain_text()),
             };
 
