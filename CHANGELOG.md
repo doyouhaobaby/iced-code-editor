@@ -11,33 +11,29 @@ None
 
 ## 0.2.5 - 2026-01-03
 
-### Fixes
-
-None
-
-### Changes
+### Added
 
 - Add html, xml, css, json and md languages (#2). 
 
 ## 0.2.4 - 2025-12-27
 
-### Fixes
+### Fixed
 
 - Key Space not sending to iced-code-editor ([#1](https://github.com/LuDog71FR/iced-code-editor/issues/1)) 
 
-### Changes
+### Changed
 
 - Better handle keyboard entries
 
 ## [0.2.3] - 2025-12-19
 
-### Fixes
+### Fixed
 
 - Fix example code in README & lib
 
 ## [0.2.2] - 2025-12-19
 
-### Fixes
+### Fixed
 
 - Fix GitHub repository link in Cargo.toml
 
@@ -47,7 +43,7 @@ None
 
 - Add build badge in README.md
 
-### Changes
+### Changed
 
 - Fix GitHub repository link in README.md
 
