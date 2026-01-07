@@ -164,6 +164,33 @@ impl CodeEditor {
         self.buffer.to_string()
     }
 
+    /// Sets the viewport height for the editor.
+    ///
+    /// This determines the minimum height of the canvas, ensuring proper
+    /// background rendering even when content is smaller than the viewport.
+    ///
+    /// # Arguments
+    ///
+    /// * `height` - The viewport height in pixels
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs")
+    ///     .with_viewport_height(500.0);
+    /// ```
+    #[must_use]
+    pub fn with_viewport_height(mut self, height: f32) -> Self {
+        self.viewport_height = height;
+        self
+    }
+
     /// Sets the theme style for the editor.
     ///
     /// # Arguments

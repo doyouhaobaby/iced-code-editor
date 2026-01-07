@@ -1,5 +1,5 @@
 use iced::widget::{button, column, container, pick_list, row, text};
-use iced::{Element, Subscription, Task, window};
+use iced::{Element, Length, Subscription, Task, window};
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, theme};
 use std::path::PathBuf;
@@ -74,14 +74,6 @@ impl DemoApp {
         let lua_content = r#"-- Lua code editor
 -- Use the buttons to open and save files
 
-function hello_world()
-    print("Hello, World!")
-    
-    for i = 1, 10 do
-        print("Count: " .. i)
-    end
-end
-
 function fibonacci(n)
     if n <= 1 then
         return n
@@ -106,7 +98,6 @@ local person = {
 }
 
 -- Main execution
-hello_world()
 print("Fibonacci(10) = " .. fibonacci(10))
 print("Factorial(5) = " .. factorial(5))
 person:greet()
@@ -114,7 +105,8 @@ person:greet()
 
         (
             Self {
-                editor: CodeEditor::new(lua_content, "lua"),
+                editor: CodeEditor::new(lua_content, "lua")
+                    .with_viewport_height(1200.0),
                 current_file: None,
                 error_message: None,
                 current_theme: EditorTheme::Dark,
@@ -137,7 +129,8 @@ person:greet()
             Message::FileOpened(result) => {
                 match result {
                     Ok((path, content)) => {
-                        self.editor = CodeEditor::new(&content, "lua");
+                        self.editor = CodeEditor::new(&content, "lua")
+                            .with_viewport_height(1200.0);
                         // Apply current theme to the new editor
                         let style = match self.current_theme {
                             EditorTheme::Dark => {
@@ -266,17 +259,18 @@ person:greet()
         };
 
         // Main editor
-        let editor_view = container(
-            self.editor.view().map(Message::EditorEvent),
-        )
-        .style(|_theme| container::Style {
-            border: iced::Border {
-                color: iced::Color::from_rgb(0.2, 0.2, 0.2),
-                width: 1.0,
-                radius: 0.0.into(),
-            },
-            ..Default::default()
-        });
+        let editor_view =
+            container(self.editor.view().map(Message::EditorEvent))
+                .width(Length::Fixed(600.0))
+                .height(Length::Fixed(800.0))
+                .style(|_theme| container::Style {
+                    border: iced::Border {
+                        color: iced::Color::from_rgb(0.2, 0.2, 0.2),
+                        width: 1.0,
+                        radius: 0.0.into(),
+                    },
+                    ..Default::default()
+                });
 
         // Main layout
         container(

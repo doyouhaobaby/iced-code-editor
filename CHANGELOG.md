@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 None
 
+## 0.2.6 - 2026-01-07
+
+### Fixed
+
+fix: canvas background now respects viewport height instead of content height
+
 ## 0.2.5 - 2026-01-03
 
 ### Added

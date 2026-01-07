@@ -9,14 +9,15 @@ use super::{CodeEditor, LINE_HEIGHT, Message};
 impl CodeEditor {
     /// Creates the view element with scrollable wrapper.
     pub fn view(&self) -> Element<'_, Message> {
-        // Calculate total content height
+        // Calculate total content height (minimum = viewport height)
         let total_lines = self.buffer.line_count();
         let content_height = total_lines as f32 * LINE_HEIGHT;
+        let min_height = content_height.max(self.viewport_height);
 
-        // Create canvas with fixed height based on content
+        // Create canvas with fixed height based on content or viewport
         let canvas = Canvas::new(self)
             .width(Length::Fill)
-            .height(Length::Fixed(content_height));
+            .height(Length::Fixed(min_height));
 
         // Capture style colors for the scrollbar style closure
         let scrollbar_bg = self.style.scrollbar_background;
