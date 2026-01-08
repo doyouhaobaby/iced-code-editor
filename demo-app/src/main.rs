@@ -186,14 +186,19 @@ greet("World")
 
         // Create vertical pane_grid with editor on top, output on bottom
         let (mut panes, editor_pane) = pane_grid::State::new(PaneType::Editor);
-        let (_output_pane, _split) = panes
-            .split(pane_grid::Axis::Horizontal, editor_pane, PaneType::Output)
-            .expect("Failed to create output pane");
+        // Split always succeeds when called on a valid pane
+        if let Some((_output_pane, _split)) = panes.split(
+            pane_grid::Axis::Horizontal,
+            editor_pane,
+            PaneType::Output,
+        ) {
+            // Split succeeded, panes is now configured
+        }
 
-        let mut log_messages = Vec::new();
-        log_messages.push("[INFO] Application started".to_string());
-        log_messages
-            .push("[INFO] Editor initialized with default content".to_string());
+        let log_messages = vec![
+            "[INFO] Application started".to_string(),
+            "[INFO] Editor initialized with default content".to_string(),
+        ];
 
         (
             Self {
@@ -225,34 +230,26 @@ greet("World")
                 self.log("INFO", "Opening file dialog...");
                 Task::perform(open_file_dialog(), Message::FileOpened)
             }
-            Message::FileOpened(result) => {
-                match result {
-                    Ok((path, content)) => {
-                        self.log(
-                            "INFO",
-                            &format!("Opened: {}", path.display()),
-                        );
-                        self.editor = CodeEditor::new(&content, "lua");
-                        let style = match self.current_theme {
-                            EditorTheme::Dark => {
-                                theme::dark(&iced::Theme::Dark)
-                            }
-                            EditorTheme::Light => {
-                                theme::light(&iced::Theme::Light)
-                            }
-                        };
-                        self.editor.set_theme(style);
-                        self.editor.mark_saved();
-                        self.current_file = Some(path);
-                        self.error_message = None;
-                    }
-                    Err(err) => {
-                        self.log("ERROR", &err);
-                        self.error_message = Some(err);
-                    }
+            Message::FileOpened(result) => match result {
+                Ok((path, content)) => {
+                    self.log("INFO", &format!("Opened: {}", path.display()));
+                    let task = self.editor.reset(&content);
+                    let style = match self.current_theme {
+                        EditorTheme::Dark => theme::dark(&iced::Theme::Dark),
+                        EditorTheme::Light => theme::light(&iced::Theme::Light),
+                    };
+                    self.editor.set_theme(style);
+                    self.editor.mark_saved();
+                    self.current_file = Some(path);
+                    self.error_message = None;
+                    task.map(Message::EditorEvent)
                 }
-                Task::none()
-            }
+                Err(err) => {
+                    self.log("ERROR", &err);
+                    self.error_message = Some(err);
+                    Task::none()
+                }
+            },
             Message::SaveFile => {
                 if let Some(path) = self.current_file.clone() {
                     self.log("INFO", &format!("Saving to: {}", path.display()));
@@ -313,7 +310,7 @@ greet("World")
                     "INFO",
                     &format!("Template selected: {}", template.name()),
                 );
-                self.editor = CodeEditor::new(template.content(), "lua");
+                let task = self.editor.reset(template.content());
                 let style = match self.current_theme {
                     EditorTheme::Dark => theme::dark(&iced::Theme::Dark),
                     EditorTheme::Light => theme::light(&iced::Theme::Light),
@@ -321,7 +318,7 @@ greet("World")
                 self.editor.set_theme(style);
                 self.dropdown_expanded = false;
                 self.current_file = None;
-                Task::none()
+                task.map(Message::EditorEvent)
             }
             Message::ClearLog => {
                 self.log_messages.clear();
@@ -419,16 +416,9 @@ greet("World")
                     }
                     PaneType::Output => {
                         let title = pane_grid::TitleBar::new(
-                            row![
-                                text("Output").style(move |_| text::Style {
-                                    color: Some(text_color),
-                                }),
-                                Space::new().width(Length::Fill),
-                                button(text("Clear").size(12))
-                                    .on_press(Message::ClearLog)
-                                    .padding(2),
-                            ]
-                            .align_y(iced::Center),
+                            text("Output").style(move |_| text::Style {
+                                color: Some(text_color),
+                            }),
                         )
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(
@@ -576,6 +566,46 @@ greet("World")
 
     /// Renders the output pane content.
     fn view_output_pane(&self, text_color: Color) -> Element<'_, Message> {
+        // Clear button with hover effect
+        let clear_button = button(text("Clear").size(12))
+            .on_press(Message::ClearLog)
+            .padding(4)
+            .style(|theme: &iced::Theme, status| {
+                let palette = theme.extended_palette();
+                match status {
+                    iced::widget::button::Status::Hovered => {
+                        iced::widget::button::Style {
+                            background: Some(iced::Background::Color(
+                                palette.primary.weak.color,
+                            )),
+                            text_color: palette.primary.weak.text,
+                            border: iced::Border {
+                                radius: 4.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }
+                    }
+                    _ => iced::widget::button::Style {
+                        background: Some(iced::Background::Color(
+                            palette.background.weak.color,
+                        )),
+                        text_color: palette.background.weak.text,
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                }
+            });
+
+        // Toolbar row with Clear button aligned to the right
+        let toolbar = row![Space::new().width(Length::Fill), clear_button]
+            .padding(5)
+            .align_y(iced::Center);
+
+        // Log messages content
         let log_content: Vec<Element<'_, Message>> = self
             .log_messages
             .iter()
@@ -595,12 +625,16 @@ greet("World")
             })
             .collect();
 
-        scrollable(
+        let log_scrollable = scrollable(
             column(log_content).spacing(2).padding(10).width(Length::Fill),
         )
         .height(Length::Fill)
-        .width(Length::Fill)
-        .into()
+        .width(Length::Fill);
+
+        column![toolbar, log_scrollable]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// Returns the file status string.

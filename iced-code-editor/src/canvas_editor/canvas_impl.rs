@@ -25,10 +25,6 @@ impl canvas::Program<Message> for CodeEditor {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
-            // Note: Background colors are handled by parent containers in view.rs
-            // to ensure proper clipping when the editor is resized.
-            // The Canvas only draws content (text, line numbers, cursor, selection).
-
             let total_lines = self.buffer.line_count();
 
             // Calculate visible line range based on viewport for optimized rendering
@@ -410,13 +406,19 @@ impl canvas::Program<Message> for CodeEditor {
                 })
             }
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                // Handle mouse drag for selection
+                // Handle mouse drag for selection only when cursor is within bounds
                 cursor.position_in(bounds).map(|position| {
                     Action::publish(Message::MouseDrag(position)).and_capture()
                 })
             }
             Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                Some(Action::publish(Message::MouseRelease).and_capture())
+                // Only handle mouse release when cursor is within bounds
+                // This prevents capturing events meant for other widgets
+                if cursor.is_over(bounds) {
+                    Some(Action::publish(Message::MouseRelease).and_capture())
+                } else {
+                    None
+                }
             }
             _ => None,
         }

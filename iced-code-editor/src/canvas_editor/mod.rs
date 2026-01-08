@@ -3,8 +3,8 @@
 //! This module provides a custom Canvas widget that handles all text rendering
 //! and input directly, bypassing Iced's higher-level widgets for optimal speed.
 
-use iced::widget::Id;
-use iced::widget::canvas;
+use iced::widget::operation::{RelativeOffset, snap_to};
+use iced::widget::{Id, canvas};
 use std::time::Instant;
 
 use crate::text_buffer::TextBuffer;
@@ -208,6 +208,54 @@ impl CodeEditor {
     pub fn set_theme(&mut self, style: Style) {
         self.style = style;
         self.cache.clear(); // Force redraw with new theme
+    }
+
+    /// Resets the editor with new content.
+    ///
+    /// This method replaces the buffer content and resets all editor state
+    /// (cursor position, selection, scroll, history) to initial values.
+    /// Use this instead of creating a new `CodeEditor` instance to ensure
+    /// proper widget tree updates in iced.
+    ///
+    /// Returns a `Task` that scrolls the editor to the top, which also
+    /// forces a redraw of the canvas.
+    ///
+    /// # Arguments
+    ///
+    /// * `content` - The new text content
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` that should be returned from your update function
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let mut editor = CodeEditor::new("initial content", "lua");
+    /// // Later, reset with new content and get the task
+    /// let task = editor.reset("new content");
+    /// // Return task.map(YourMessage::Editor) from your update function
+    /// ```
+    pub fn reset(&mut self, content: &str) -> iced::Task<Message> {
+        self.buffer = TextBuffer::new(content);
+        self.cursor = (0, 0);
+        self.scroll_offset = 0.0;
+        self.selection_start = None;
+        self.selection_end = None;
+        self.is_dragging = false;
+        self.viewport_scroll = 0.0;
+        self.history = CommandHistory::new(100);
+        self.is_grouping = false;
+        self.last_blink = Instant::now();
+        self.cursor_visible = true;
+        // Create a new cache to ensure complete redraw (clear() is not sufficient
+        // when new content is smaller than previous content)
+        self.cache = canvas::Cache::default();
+
+        // Scroll to top to force a redraw
+        snap_to(self.scrollable_id.clone(), RelativeOffset::START)
     }
 
     /// Resets the cursor blink animation.

@@ -303,7 +303,13 @@ impl CodeEditor {
             Message::Scrolled(viewport) => {
                 // Track viewport scroll position and height
                 self.viewport_scroll = viewport.absolute_offset().y;
-                self.viewport_height = viewport.bounds().height;
+                let new_height = viewport.bounds().height;
+                // Clear cache when viewport height changes significantly
+                // to ensure proper redraw (e.g., window resize)
+                if (self.viewport_height - new_height).abs() > 1.0 {
+                    self.cache.clear();
+                }
+                self.viewport_height = new_height;
                 Task::none()
             }
             Message::Undo => {

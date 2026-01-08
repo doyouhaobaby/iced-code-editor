@@ -12,15 +12,18 @@ impl CodeEditor {
     /// The backgrounds (editor and gutter) are handled by container styles
     /// to ensure proper clipping when the pane is resized.
     pub fn view(&self) -> Element<'_, Message> {
-        // Calculate total content height based on actual lines only
+        // Calculate total content height based on actual lines
+        // Use max of content height and viewport height to ensure the canvas
+        // always covers the visible area (prevents visual artifacts when
+        // content is shorter than viewport after reset/file change)
         let total_lines = self.buffer.line_count();
         let content_height = total_lines as f32 * LINE_HEIGHT;
+        let canvas_height = content_height.max(self.viewport_height);
 
-        // Create canvas with height based on content only
-        // The scrollable wrapper will handle the viewport constraints
+        // Create canvas with height that covers at least the viewport
         let canvas = Canvas::new(self)
             .width(Length::Fill)
-            .height(Length::Fixed(content_height));
+            .height(Length::Fixed(canvas_height));
 
         // Capture style colors for closures
         let scrollbar_bg = self.style.scrollbar_background;
