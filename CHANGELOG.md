@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 None
 
+## 0.2.8 - 2026-01-08
+
+### Fixed
+
+fix: prevent editor background overflow when resizing panes
+
+## 0.2.7 - 2026-01-08
+
+### Fixed
+
+fix: scrollable height now respects parent container bounds
+
 ## 0.2.6 - 2026-01-07
 
 ### Fixed

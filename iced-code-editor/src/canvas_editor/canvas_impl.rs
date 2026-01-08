@@ -25,23 +25,27 @@ impl canvas::Program<Message> for CodeEditor {
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
         let geometry = self.cache.draw(renderer, bounds.size(), |frame| {
-            // Background
-            frame.fill_rectangle(
-                Point::ORIGIN,
-                bounds.size(),
-                self.style.background,
-            );
+            // Note: Background colors are handled by parent containers in view.rs
+            // to ensure proper clipping when the editor is resized.
+            // The Canvas only draws content (text, line numbers, cursor, selection).
 
-            // Calculate visible lines (virtual scrolling - Scrollable handles the offset)
-            // Since the canvas has full height, we need to draw all lines
             let total_lines = self.buffer.line_count();
 
-            // Draw gutter background (full height)
-            frame.fill_rectangle(
-                Point::ORIGIN,
-                Size::new(GUTTER_WIDTH, bounds.height),
-                self.style.gutter_background,
-            );
+            // Calculate visible line range based on viewport for optimized rendering
+            // This ensures we only draw lines that are visible, preventing overflow
+            // and improving performance for large files.
+            // Use bounds.height as fallback when viewport_height is not yet initialized
+            let effective_viewport_height = if self.viewport_height > 0.0 {
+                self.viewport_height
+            } else {
+                bounds.height
+            };
+            let first_visible_line =
+                (self.viewport_scroll / LINE_HEIGHT).floor() as usize;
+            let visible_lines_count =
+                (effective_viewport_height / LINE_HEIGHT).ceil() as usize + 2;
+            let last_visible_line =
+                (first_visible_line + visible_lines_count).min(total_lines);
 
             // Load syntax highlighting
             let syntax_set = SyntaxSet::load_defaults_newlines();
@@ -63,9 +67,12 @@ impl canvas::Program<Message> for CodeEditor {
                 _ => Some(syntax_set.find_syntax_plain_text()),
             };
 
-            // Draw line numbers and text for all lines (Scrollable clips viewport)
-            for line_idx in 0..total_lines {
+            // Draw only visible lines (virtual scrolling optimization)
+            for line_idx in first_visible_line..last_visible_line {
                 let y = line_idx as f32 * LINE_HEIGHT;
+
+                // Note: Gutter background is handled by a container in view.rs
+                // to ensure proper clipping when the pane is resized.
 
                 // Draw line number
                 let line_num_text = format!("{:>4}", line_idx + 1);
