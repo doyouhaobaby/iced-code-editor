@@ -127,12 +127,17 @@ echo ""
 git status
 echo ""
 
-confirm "Proceed with 'git add .' ?"
-git add .
+# Check if there are changes to commit
+if [ -z "$(git status --porcelain)" ]; then
+    echo "No changes to commit, skipping commit step."
+else
+    confirm "Proceed with 'git add .' ?"
+    git add .
 
-echo ""
-echo "Committing with message: $COMMIT_MSG"
-git commit -m "$COMMIT_MSG"
+    echo ""
+    echo "Committing with message: $COMMIT_MSG"
+    git commit -m "$COMMIT_MSG"
+fi
 
 # 16-17. Git push
 echo ""
