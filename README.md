@@ -249,7 +249,7 @@ cargo run --package demo-app --release
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-Check [docs\DEV.md](https://github.com/LuDog71FR/iced-code-editor/blob/main/docs\DEV.md) for more details.
+Check [docs\DEV.md](https://github.com/LuDog71FR/iced-code-editor/blob/main/docs/DEV.md) for more details.
 
 ## License
 
