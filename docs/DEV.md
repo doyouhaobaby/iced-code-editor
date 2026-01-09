@@ -18,6 +18,7 @@
    - [Cursor Blinking](#cursor-blinking)
    - [Selection Rendering](#selection-rendering)
    - [Scroll-to-Cursor](#scroll-to-cursor)
+   - [Internationalization (i18n)](#internationalization-i18n)
 5. [Performance Considerations](#performance-considerations)
    - [Canvas Caching](#1-canvas-caching)
    - [Syntax Highlighting Optimization](#2-syntax-highlighting-optimization)
@@ -414,6 +415,63 @@ pub fn scroll_to_cursor(&self) -> Task<Message> {
 ```
 
 **Smart margins:** 2 lines of padding to prevent cursor at edge
+
+## Internationalization (i18n)
+
+**Location:** `i18n.rs`, `locales/*.yml`
+
+The editor uses `rust-i18n` with YAML translation files for multi-language support.
+
+**Architecture:**
+
+```rust
+pub enum Language {
+    English, French, Spanish,
+}
+
+pub struct Translations {
+    language: Language,
+}
+
+impl Translations {
+    pub fn new(language: Language) -> Self {
+        rust_i18n::set_locale(language.to_locale());
+        Self { language }
+    }
+
+    pub fn search_placeholder(&self) -> String {
+        rust_i18n::t!("search.placeholder", locale = self.language.to_locale())
+            .into_owned()
+    }
+}
+```
+
+**Translation files** (`locales/en.yml`, `fr.yml`, `es.yml`):
+
+```yaml
+search:
+  placeholder: "Search..."
+  close_tooltip: "Close search dialog (Esc)"
+replace:
+  placeholder: "Replace..."
+settings:
+  case_sensitive_label: "Case sensitive"
+```
+
+**Key design decisions:**
+
+- **Global locale**: `rust_i18n::set_locale()` sets global locale, tracked per instance
+- **Owned strings**: Returns `String` (not `&str`) - `rust_i18n::t!()` returns `Cow<'_, str>`, we call `.into_owned()` to avoid lifetime issues
+- **Initialization**: `rust_i18n::i18n!("locales", fallback = "en")` macro called in `lib.rs`
+
+**Adding a new language:**
+
+1. Create `locales/de.yml` with translation keys
+2. Add `German` to `Language` enum
+3. Update `to_locale()` to return `"de"`
+4. Add tests
+
+**See also:** [README_I18N.md](../iced-code-editor/README_I18N.md) for detailed documentation.
 
 ## Performance Considerations
 

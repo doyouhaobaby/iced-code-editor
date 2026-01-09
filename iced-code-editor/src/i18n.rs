@@ -2,6 +2,18 @@
 //!
 //! This module provides translation support for UI text in the search dialog.
 //! Currently supports English, French, and Spanish.
+//!
+//! # Using rust-i18n
+//!
+//! The translations are available in YAML files in the `locales` directory.
+//! The `rust-i18n` crate is integrated and can be used directly via the `t!` macro:
+//!
+//! ```ignore
+//! use iced_code_editor::t;
+//!
+//! // Use translations directly
+//! let text = t!("search.placeholder");
+//! ```
 
 /// Supported languages for the code editor UI.
 ///
@@ -22,6 +34,28 @@ pub enum Language {
     French,
     /// Spanish language
     Spanish,
+}
+
+impl Language {
+    /// Returns the locale code for this language.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iced_code_editor::Language;
+    ///
+    /// assert_eq!(Language::English.to_locale(), "en");
+    /// assert_eq!(Language::French.to_locale(), "fr");
+    /// assert_eq!(Language::Spanish.to_locale(), "es");
+    /// ```
+    #[must_use]
+    pub const fn to_locale(self) -> &'static str {
+        match self {
+            Self::English => "en",
+            Self::French => "fr",
+            Self::Spanish => "es",
+        }
+    }
 }
 
 /// Provides translated text strings for UI elements.
@@ -45,6 +79,8 @@ pub struct Translations {
 impl Translations {
     /// Creates a new `Translations` instance with the specified language.
     ///
+    /// This sets the global rust-i18n locale to the specified language.
+    ///
     /// # Examples
     ///
     /// ```
@@ -54,7 +90,8 @@ impl Translations {
     /// assert_eq!(translations.language(), Language::Spanish);
     /// ```
     #[must_use]
-    pub const fn new(language: Language) -> Self {
+    pub fn new(language: Language) -> Self {
+        rust_i18n::set_locale(language.to_locale());
         Self { language }
     }
 
@@ -75,6 +112,8 @@ impl Translations {
 
     /// Sets the language for translations.
     ///
+    /// This updates the global rust-i18n locale.
+    ///
     /// # Examples
     ///
     /// ```
@@ -86,6 +125,7 @@ impl Translations {
     /// ```
     pub fn set_language(&mut self, language: Language) {
         self.language = language;
+        rust_i18n::set_locale(language.to_locale());
     }
 
     /// Returns the placeholder text for the search input field.
@@ -102,12 +142,9 @@ impl Translations {
     /// assert_eq!(fr.search_placeholder(), "Rechercher...");
     /// ```
     #[must_use]
-    pub const fn search_placeholder(&self) -> &'static str {
-        match self.language {
-            Language::English => "Search...",
-            Language::French => "Rechercher...",
-            Language::Spanish => "Buscar...",
-        }
+    pub fn search_placeholder(&self) -> String {
+        rust_i18n::t!("search.placeholder", locale = self.language.to_locale())
+            .into_owned()
     }
 
     /// Returns the placeholder text for the replace input field.
@@ -121,12 +158,9 @@ impl Translations {
     /// assert_eq!(es.replace_placeholder(), "Reemplazar...");
     /// ```
     #[must_use]
-    pub const fn replace_placeholder(&self) -> &'static str {
-        match self.language {
-            Language::English => "Replace...",
-            Language::French => "Remplacer...",
-            Language::Spanish => "Reemplazar...",
-        }
+    pub fn replace_placeholder(&self) -> String {
+        rust_i18n::t!("replace.placeholder", locale = self.language.to_locale())
+            .into_owned()
     }
 
     /// Returns the label text for the case sensitive checkbox.
@@ -140,12 +174,12 @@ impl Translations {
     /// assert_eq!(fr.case_sensitive_label(), "Sensible à la casse");
     /// ```
     #[must_use]
-    pub const fn case_sensitive_label(&self) -> &'static str {
-        match self.language {
-            Language::English => "Case sensitive",
-            Language::French => "Sensible à la casse",
-            Language::Spanish => "Distinguir mayúsculas",
-        }
+    pub fn case_sensitive_label(&self) -> String {
+        rust_i18n::t!(
+            "settings.case_sensitive_label",
+            locale = self.language.to_locale()
+        )
+        .into_owned()
     }
 
     /// Returns the tooltip text for the previous match button.
@@ -159,12 +193,12 @@ impl Translations {
     /// assert_eq!(en.previous_match_tooltip(), "Previous match (Shift+F3)");
     /// ```
     #[must_use]
-    pub const fn previous_match_tooltip(&self) -> &'static str {
-        match self.language {
-            Language::English => "Previous match (Shift+F3)",
-            Language::French => "Résultat précédent (Maj+F3)",
-            Language::Spanish => "Coincidencia anterior (Mayús+F3)",
-        }
+    pub fn previous_match_tooltip(&self) -> String {
+        rust_i18n::t!(
+            "search.previous_match_tooltip",
+            locale = self.language.to_locale()
+        )
+        .into_owned()
     }
 
     /// Returns the tooltip text for the next match button.
@@ -178,12 +212,12 @@ impl Translations {
     /// assert_eq!(es.next_match_tooltip(), "Siguiente coincidencia (F3 / Enter)");
     /// ```
     #[must_use]
-    pub const fn next_match_tooltip(&self) -> &'static str {
-        match self.language {
-            Language::English => "Next match (F3 / Enter)",
-            Language::French => "Résultat suivant (F3 / Entrée)",
-            Language::Spanish => "Siguiente coincidencia (F3 / Enter)",
-        }
+    pub fn next_match_tooltip(&self) -> String {
+        rust_i18n::t!(
+            "search.next_match_tooltip",
+            locale = self.language.to_locale()
+        )
+        .into_owned()
     }
 
     /// Returns the tooltip text for the close search dialog button.
@@ -197,12 +231,12 @@ impl Translations {
     /// assert_eq!(fr.close_search_tooltip(), "Fermer la recherche (Échap)");
     /// ```
     #[must_use]
-    pub const fn close_search_tooltip(&self) -> &'static str {
-        match self.language {
-            Language::English => "Close search dialog (Esc)",
-            Language::French => "Fermer la recherche (Échap)",
-            Language::Spanish => "Cerrar búsqueda (Esc)",
-        }
+    pub fn close_search_tooltip(&self) -> String {
+        rust_i18n::t!(
+            "search.close_tooltip",
+            locale = self.language.to_locale()
+        )
+        .into_owned()
     }
 
     /// Returns the tooltip text for the replace current match button.
@@ -216,12 +250,12 @@ impl Translations {
     /// assert_eq!(en.replace_current_tooltip(), "Replace current match");
     /// ```
     #[must_use]
-    pub const fn replace_current_tooltip(&self) -> &'static str {
-        match self.language {
-            Language::English => "Replace current match",
-            Language::French => "Remplacer l'occurrence actuelle",
-            Language::Spanish => "Reemplazar coincidencia actual",
-        }
+    pub fn replace_current_tooltip(&self) -> String {
+        rust_i18n::t!(
+            "replace.current_tooltip",
+            locale = self.language.to_locale()
+        )
+        .into_owned()
     }
 
     /// Returns the tooltip text for the replace all matches button.
@@ -235,12 +269,9 @@ impl Translations {
     /// assert_eq!(es.replace_all_tooltip(), "Reemplazar todo");
     /// ```
     #[must_use]
-    pub const fn replace_all_tooltip(&self) -> &'static str {
-        match self.language {
-            Language::English => "Replace all matches",
-            Language::French => "Tout remplacer",
-            Language::Spanish => "Reemplazar todo",
-        }
+    pub fn replace_all_tooltip(&self) -> String {
+        rust_i18n::t!("replace.all_tooltip", locale = self.language.to_locale())
+            .into_owned()
     }
 }
 

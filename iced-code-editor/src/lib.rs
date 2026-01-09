@@ -196,6 +196,9 @@
 //! }
 //! ```
 
+// Initialize rust-i18n for the entire crate
+rust_i18n::i18n!("locales", fallback = "en");
+
 mod canvas_editor;
 mod text_buffer;
 

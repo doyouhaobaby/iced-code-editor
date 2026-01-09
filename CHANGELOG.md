@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pagination thru results
   - Replace one by one or all
   - Undo capability
+  - translations file created for en, fr and es (in `locales/` folder)
 
 - feat: line wrapping
 

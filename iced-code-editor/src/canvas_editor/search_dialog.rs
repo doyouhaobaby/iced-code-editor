@@ -25,7 +25,7 @@ use crate::i18n::Translations;
 /// An Iced element representing the search dialog, or empty space if closed
 pub fn view<'a>(
     search_state: &SearchState,
-    translations: &Translations,
+    translations: &'a Translations,
 ) -> Element<'a, Message> {
     if !search_state.is_open {
         // Return empty Space when closed
@@ -34,7 +34,7 @@ pub fn view<'a>(
 
     // Search input field - compact, minimum practical width with placeholder
     let search_input =
-        text_input(translations.search_placeholder(), &search_state.query)
+        text_input(&translations.search_placeholder(), &search_state.query)
             .id(search_state.search_input_id.clone())
             .on_input(Message::SearchQueryChanged)
             .on_submit(Message::FindNext)
@@ -57,7 +57,7 @@ pub fn view<'a>(
         button(fa_icon_solid("chevron-left").size(11.0))
             .on_press(Message::FindPrevious)
             .padding(2),
-        translations.previous_match_tooltip(),
+        text(translations.previous_match_tooltip()),
         tooltip::Position::Bottom,
     )
     .style(container::rounded_box);
@@ -66,7 +66,7 @@ pub fn view<'a>(
         button(fa_icon_solid("chevron-right").size(11.0))
             .on_press(Message::FindNext)
             .padding(2),
-        translations.next_match_tooltip(),
+        text(translations.next_match_tooltip()),
         tooltip::Position::Bottom,
     )
     .style(container::rounded_box);
@@ -98,7 +98,7 @@ pub fn view<'a>(
     // Add replace fields if in replace mode
     if search_state.is_replace_mode {
         let replace_input = text_input(
-            translations.replace_placeholder(),
+            &translations.replace_placeholder(),
             &search_state.replace_with,
         )
         .id(search_state.replace_input_id.clone())
@@ -111,7 +111,7 @@ pub fn view<'a>(
             button(fa_icon_solid("arrow-right-arrow-left").size(11.0))
                 .on_press(Message::ReplaceNext)
                 .padding(2),
-            translations.replace_current_tooltip(),
+            text(translations.replace_current_tooltip()),
             tooltip::Position::Bottom,
         )
         .style(container::rounded_box);
@@ -120,7 +120,7 @@ pub fn view<'a>(
             button(fa_icon_solid("arrows-rotate").size(11.0))
                 .on_press(Message::ReplaceAll)
                 .padding(2),
-            translations.replace_all_tooltip(),
+            text(translations.replace_all_tooltip()),
             tooltip::Position::Bottom,
         )
         .style(container::rounded_box);
@@ -135,7 +135,7 @@ pub fn view<'a>(
         button(fa_icon_solid("xmark").size(10.0))
             .on_press(Message::CloseSearch)
             .padding(2),
-        translations.close_search_tooltip(),
+        text(translations.close_search_tooltip()),
         tooltip::Position::Left,
     )
     .style(container::rounded_box);

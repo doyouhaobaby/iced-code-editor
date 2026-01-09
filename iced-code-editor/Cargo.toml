@@ -16,7 +16,8 @@ categories = ["gui"]
 iced.workspace = true
 syntect = "5.3"
 iced_font_awesome = "0.4"
-iced_aw = "0.13.0"
+iced_aw = "0.13"
+rust-i18n = "3"
 
 [package.metadata.docs.rs]
 all-features = true
