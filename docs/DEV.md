@@ -446,7 +446,7 @@ impl Translations {
 }
 ```
 
-**Translation files** (`locales/en.yml`, `fr.yml`, `es.yml`):
+**Translation files** (`locales/en.yml`, `fr.yml`, `es.yml`, ...):
 
 ```yaml
 search:
@@ -471,7 +471,7 @@ settings:
 3. Update `to_locale()` to return `"de"`
 4. Add tests
 
-**See also:** [README_I18N.md](../iced-code-editor/README_I18N.md) for detailed documentation.
+**See also:** [docs/i18n.md](https://github.com/LuDog71FR/iced-code-editor/blob/main/docs/i18n.md) for detailed documentation.
 
 ## Performance Considerations
 
