@@ -2,6 +2,8 @@
 
 <div align="center">
 
+![Logo](https://github.com/LuDog71FR/iced-code-editor/blob/main/logo.svg)
+
 A high-performance, canvas-based code editor widget for [Iced](https://github.com/iced-rs/iced).
 
 [![Crates.io](https://img.shields.io/crates/v/iced-code-editor.svg)](https://crates.io/crates/iced-code-editor)
