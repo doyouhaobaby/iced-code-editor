@@ -14,7 +14,7 @@ categories = ["gui"]
 
 [dependencies]
 iced.workspace = true
-syntect = "5.2"
+syntect = "5.3"
 
 [package.metadata.docs.rs]
 all-features = true
