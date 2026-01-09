@@ -13,7 +13,7 @@ use iced::widget::{
     PaneGrid, Space, button, column, container, pane_grid, pick_list, row,
     scrollable, text,
 };
-use iced::{Color, Element, Length, Subscription, Task, window};
+use iced::{Color, Element, Length, Subscription, Task, Theme, window};
 use iced_aw::widget::drop_down::DropDown;
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, theme};
@@ -23,27 +23,8 @@ use std::path::PathBuf;
 fn main() -> iced::Result {
     iced::application(DemoApp::new, DemoApp::update, DemoApp::view)
         .subscription(DemoApp::subscription)
+        .theme(DemoApp::theme)
         .run()
-}
-
-/// Available themes for the editor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditorTheme {
-    Dark,
-    Light,
-}
-
-impl EditorTheme {
-    const ALL: [EditorTheme; 2] = [EditorTheme::Dark, EditorTheme::Light];
-}
-
-impl std::fmt::Display for EditorTheme {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EditorTheme::Dark => write!(f, "Dark"),
-            EditorTheme::Light => write!(f, "Light"),
-        }
-    }
 }
 
 /// Code templates available in the dropdown.
@@ -130,9 +111,7 @@ struct DemoApp {
     /// Error message
     error_message: Option<String>,
     /// Current theme
-    current_theme: EditorTheme,
-    /// Background color
-    background_color: Color,
+    current_theme: Theme,
     /// Pane grid state
     panes: pane_grid::State<PaneType>,
     /// Dropdown expanded state
@@ -159,7 +138,7 @@ enum Message {
     /// Cursor blink tick
     Tick,
     /// Theme changed
-    ThemeChanged(EditorTheme),
+    ThemeChanged(Theme),
     /// Pane resized
     PaneResized(pane_grid::ResizeEvent),
     /// Toggle dropdown
@@ -206,8 +185,7 @@ greet("World")
                 editor: CodeEditor::new(default_content, "lua"),
                 current_file: None,
                 error_message: None,
-                current_theme: EditorTheme::Dark,
-                background_color: Color::from_rgb(0.15, 0.15, 0.15),
+                current_theme: Theme::TokyoNightStorm,
                 panes,
                 dropdown_expanded: false,
                 log_messages,
@@ -235,10 +213,7 @@ greet("World")
                 Ok((path, content)) => {
                     self.log("INFO", &format!("Opened: {}", path.display()));
                     let task = self.editor.reset(&content);
-                    let style = match self.current_theme {
-                        EditorTheme::Dark => theme::dark(&iced::Theme::Dark),
-                        EditorTheme::Light => theme::light(&iced::Theme::Light),
-                    };
+                    let style = theme::from_iced_theme(&self.current_theme);
                     self.editor.set_theme(style);
                     self.editor.mark_saved();
                     self.current_file = Some(path);
@@ -285,17 +260,10 @@ greet("World")
                 .update(&EditorMessage::Tick)
                 .map(Message::EditorEvent),
             Message::ThemeChanged(new_theme) => {
-                self.log("INFO", &format!("Theme changed to: {}", new_theme));
+                self.log("INFO", &format!("Theme changed to: {:?}", new_theme));
+                let style = theme::from_iced_theme(&new_theme);
                 self.current_theme = new_theme;
-                let style = match new_theme {
-                    EditorTheme::Dark => theme::dark(&iced::Theme::Dark),
-                    EditorTheme::Light => theme::light(&iced::Theme::Light),
-                };
                 self.editor.set_theme(style);
-                self.background_color = match new_theme {
-                    EditorTheme::Dark => Color::from_rgb(0.15, 0.15, 0.15),
-                    EditorTheme::Light => Color::from_rgb(0.92, 0.92, 0.92),
-                };
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
@@ -312,10 +280,7 @@ greet("World")
                     &format!("Template selected: {}", template.name()),
                 );
                 let task = self.editor.reset(template.content());
-                let style = match self.current_theme {
-                    EditorTheme::Dark => theme::dark(&iced::Theme::Dark),
-                    EditorTheme::Light => theme::light(&iced::Theme::Light),
-                };
+                let style = theme::from_iced_theme(&self.current_theme);
                 self.editor.set_theme(style);
                 self.dropdown_expanded = false;
                 self.current_file = None;
@@ -342,12 +307,15 @@ greet("World")
         window::frames().map(|_| Message::Tick)
     }
 
+    /// Returns the current theme for the application.
+    fn theme(&self) -> Theme {
+        self.current_theme.clone()
+    }
+
     /// Renders the user interface.
     fn view(&self) -> Element<'_, Message> {
-        let text_color = match self.current_theme {
-            EditorTheme::Dark => Color::from_rgb(0.9, 0.9, 0.9),
-            EditorTheme::Light => Color::from_rgb(0.1, 0.1, 0.1),
-        };
+        let palette = self.current_theme.extended_palette();
+        let text_color = palette.background.base.text;
 
         // Toolbar
         let toolbar = row![
@@ -361,8 +329,8 @@ greet("World")
             text("Theme:")
                 .style(move |_| text::Style { color: Some(text_color) }),
             pick_list(
-                &EditorTheme::ALL[..],
-                Some(self.current_theme),
+                Theme::ALL,
+                Some(self.current_theme.clone()),
                 Message::ThemeChanged
             ),
         ]
@@ -384,10 +352,7 @@ greet("World")
         // Pane grid
         let pane_grid =
             PaneGrid::new(&self.panes, |_id, pane, _is_maximized| {
-                let title_bar_style = match self.current_theme {
-                    EditorTheme::Dark => Color::from_rgb(0.2, 0.2, 0.25),
-                    EditorTheme::Light => Color::from_rgb(0.85, 0.85, 0.88),
-                };
+                let title_bar_style = palette.background.weak.color;
 
                 match pane {
                     PaneType::Editor => {
@@ -408,11 +373,13 @@ greet("World")
                             self.view_editor_pane(text_color),
                         )
                         .title_bar(title)
-                        .style(|_| container::Style {
-                            background: Some(iced::Background::Color(
-                                self.background_color,
-                            )),
-                            ..Default::default()
+                        .style(move |_| {
+                            container::Style {
+                                background: Some(iced::Background::Color(
+                                    palette.background.base.color,
+                                )),
+                                ..Default::default()
+                            }
                         })
                     }
                     PaneType::Output => {
@@ -433,11 +400,13 @@ greet("World")
                             self.view_output_pane(text_color),
                         )
                         .title_bar(title)
-                        .style(|_| container::Style {
-                            background: Some(iced::Background::Color(
-                                self.background_color,
-                            )),
-                            ..Default::default()
+                        .style(move |_| {
+                            container::Style {
+                                background: Some(iced::Background::Color(
+                                    palette.background.base.color,
+                                )),
+                                ..Default::default()
+                            }
                         })
                     }
                 }
@@ -453,7 +422,9 @@ greet("World")
                 .height(Length::Fill),
         )
         .style(move |_| container::Style {
-            background: Some(iced::Background::Color(self.background_color)),
+            background: Some(iced::Background::Color(
+                palette.background.base.color,
+            )),
             ..Default::default()
         })
         .width(Length::Fill)

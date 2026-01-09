@@ -28,7 +28,7 @@ This crate provides a fully-featured code editor widget with syntax highlighting
 - **Undo/Redo** with smart command grouping and configurable history
 - **Custom scrollbars** with themed styling
 - **Focus management** for multiple editors
-- **Dark & light themes** with customizable colors
+- **Native Iced theme support** - Automatically adapts to all 23+ built-in Iced themes
 - **High performance** canvas-based rendering
 
 ## Quick Start
@@ -135,14 +135,22 @@ The editor features smart command grouping - consecutive typing is grouped into 
 
 ### Changing Themes
 
+The editor automatically adapts to any Iced theme. All 23+ built-in Iced themes are supported:
+
 ```rust
 use iced_code_editor::theme;
 
-// Apply dark theme
-editor.set_theme(theme::dark(&iced::Theme::Dark));
+// Apply any built-in Iced theme
+editor.set_theme(theme::from_iced_theme(&iced::Theme::TokyoNightStorm));
+editor.set_theme(theme::from_iced_theme(&iced::Theme::Dracula));
+editor.set_theme(theme::from_iced_theme(&iced::Theme::Nord));
+editor.set_theme(theme::from_iced_theme(&iced::Theme::CatppuccinMocha));
+editor.set_theme(theme::from_iced_theme(&iced::Theme::GruvboxDark));
 
-// Apply light theme
-editor.set_theme(theme::light(&iced::Theme::Light));
+// Or use any theme from Theme::ALL
+for theme in iced::Theme::ALL {
+    editor.set_theme(theme::from_iced_theme(theme));
+}
 ```
 
 ### Getting and Setting Content
@@ -179,15 +187,37 @@ Message::Tick => {
 
 ## Themes
 
-The editor supports both dark and light themes with customizable colors. Each theme includes:
+The editor natively supports all built-in Iced themes with automatic color adaptation:
 
-- Background and foreground colors
-- Gutter (line numbers) styling
-- Selection colors
-- Cursor appearance
-- Scrollbar styling
+### Supported Themes
 
-Themes automatically adapt to syntax highlighting for optimal readability.
+**Basic Themes:**
+- Light, Dark
+
+**Popular Color Schemes:**
+- Dracula, Nord, Solarized (Light/Dark), Gruvbox (Light/Dark)
+
+**Catppuccin Variants:**
+- Latte, Frappé, Macchiato, Mocha
+
+**Tokyo Night Variants:**
+- Tokyo Night, Tokyo Night Storm, Tokyo Night Light
+
+**Kanagawa Variants:**
+- Wave, Dragon, Lotus
+
+**Additional Themes:**
+- Moonfly, Nightfly, Oxocarbon, Ferra
+
+Each theme automatically provides:
+- Optimized background and foreground colors
+- Adaptive gutter (line numbers) styling
+- Appropriate text selection colors
+- Themed cursor appearance
+- Custom scrollbar styling
+- Subtle current line highlighting
+
+The editor intelligently adapts colors from the Iced theme palette for optimal code readability.
 
 ## Supported Languages
 

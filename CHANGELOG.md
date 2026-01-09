@@ -7,46 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-None
+### Changed
 
-## 0.2.9 - 2026-01-08
+- **BREAKING**: Removed `theme::dark()` and `theme::light()` functions
+- **BREAKING**: Changed default theme to use `theme::from_iced_theme()` which auto-adapts to any Iced theme
+
+### Added
+
+- feat!: Native support for all built-in Iced themes
+  - New `theme::from_iced_theme()` function that automatically adapts editor colors to any Iced theme palette
+  - Color helper functions for optimal code editor appearance (darken, lighten, dim_color, with_alpha)
+  - Demo app now uses native Iced theme system with full theme picker
+
+## [0.2.9] - 2026-01-08
 
 ### Fixed
 
 fix: prevent visual artifacts when switching to shorter content
-  Use the new `reset()` function instead of creating again a new code editor !
+Use the new `reset()` function instead of creating again a new code editor !
 fix: prevent mouse to capture events when out of bounds
 
-
-## 0.2.8 - 2026-01-08
+## [0.2.8] - 2026-01-08
 
 ### Fixed
 
 fix: prevent editor background overflow when resizing panes
 
-## 0.2.7 - 2026-01-08
+## [0.2.7] - 2026-01-08
 
 ### Fixed
 
 fix: scrollable height now respects parent container bounds
 
-## 0.2.6 - 2026-01-07
+## [0.2.6] - 2026-01-07
 
 ### Fixed
 
 fix: canvas background now respects viewport height instead of content height
 
-## 0.2.5 - 2026-01-03
+## [0.2.5] - 2026-01-03
 
 ### Added
 
-- Add html, xml, css, json and md languages (#2). 
+- Add html, xml, css, json and md languages (#2).
 
-## 0.2.4 - 2025-12-27
+## [0.2.4] - 2025-12-27
 
 ### Fixed
 
-- Key Space not sending to iced-code-editor ([#1](https://github.com/LuDog71FR/iced-code-editor/issues/1)) 
+- Key Space not sending to iced-code-editor ([#1](https://github.com/LuDog71FR/iced-code-editor/issues/1))
 
 ### Changed
 

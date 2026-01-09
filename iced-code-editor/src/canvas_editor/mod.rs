@@ -139,7 +139,7 @@ impl CodeEditor {
             buffer: TextBuffer::new(content),
             cursor: (0, 0),
             scroll_offset: 0.0,
-            style: crate::theme::dark(&iced::Theme::Dark),
+            style: crate::theme::from_iced_theme(&iced::Theme::TokyoNightStorm),
             syntax: syntax.to_string(),
             last_blink: Instant::now(),
             cursor_visible: true,
@@ -203,7 +203,7 @@ impl CodeEditor {
     /// use iced_code_editor::{CodeEditor, theme};
     ///
     /// let mut editor = CodeEditor::new("fn main() {}", "rs");
-    /// editor.set_theme(theme::light(&iced::Theme::Light));
+    /// editor.set_theme(theme::from_iced_theme(&iced::Theme::TokyoNightStorm));
     /// ```
     pub fn set_theme(&mut self, style: Style) {
         self.style = style;

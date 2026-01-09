@@ -64,16 +64,18 @@
 //!
 //! # Themes
 //!
-//! The editor supports both dark and light themes:
+//! The editor supports all native Iced themes with automatic color adaptation:
 //!
 //! ```no_run
 //! use iced_code_editor::{CodeEditor, theme};
 //!
-//! // Create an editor with dark theme (default)
+//! // Create an editor (defaults to Tokyo Night Storm theme)
 //! let mut editor = CodeEditor::new("fn main() {}", "rs");
 //!
-//! // Switch to light theme
-//! editor.set_theme(theme::light(&iced::Theme::Light));
+//! // Switch to any Iced theme
+//! editor.set_theme(theme::from_iced_theme(&iced::Theme::Dracula));
+//! editor.set_theme(theme::from_iced_theme(&iced::Theme::CatppuccinMocha));
+//! editor.set_theme(theme::from_iced_theme(&iced::Theme::Nord));
 //! ```
 //!
 //! # Keyboard Shortcuts
@@ -200,4 +202,4 @@ mod text_buffer;
 pub mod theme;
 
 pub use canvas_editor::{ArrowDirection, CodeEditor, CommandHistory, Message};
-pub use theme::{Catalog, Style, StyleFn, dark, light};
+pub use theme::{Catalog, Style, StyleFn, from_iced_theme};

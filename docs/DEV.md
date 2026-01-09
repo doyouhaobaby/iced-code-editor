@@ -76,7 +76,7 @@ pub struct TextBuffer {
 
 #### 3. **Theme System** (`theme.rs`)
 
-A trait-based theming system following Iced's styling conventions:
+A trait-based theming system following Iced's styling conventions with native support for all Iced themes:
 
 ```rust
 pub trait Catalog {
@@ -88,6 +88,8 @@ pub struct Style {
     background: Color,
     text_color: Color,
     gutter_background: Color,
+    line_number_color: Color,
+    current_line_highlight: Color,
     // ... other colors
 }
 ```
@@ -95,8 +97,32 @@ pub struct Style {
 **Features:**
 - Implements Iced's `Catalog` trait for seamless integration
 - Function-based styling (`StyleFn`) for dynamic themes
-- Pre-built `dark()` and `light()` themes matching VSCode
-- Fully customizable for any color scheme
+- **Native support for all 23+ Iced themes** via `from_iced_theme()`
+- Automatic color adaptation based on light/dark theme detection
+- Intelligent color adjustments for optimal code readability
+
+**Theme Adaptation:**
+The `from_iced_theme()` function automatically extracts colors from any Iced theme's extended palette:
+- **Background/Text**: Uses `palette.background.base` for primary colors
+- **Gutter**: Uses `palette.background.weak` for subtle distinction
+- **Line Numbers**: Intelligently dimmed/blended based on theme darkness
+- **Current Line**: Subtle highlight using `palette.primary.weak` with transparency
+- **Scrollbar**: Uses `palette.secondary.weak` for visibility
+
+**Color Helpers:**
+- `darken()` / `lighten()` - Adjust color brightness
+- `dim_color()` - Reduce intensity for dark themes
+- `blend_colors()` - Mix colors for light themes
+- `with_alpha()` - Apply transparency
+
+**Supported Themes:**
+All native Iced themes are automatically supported:
+- Basic: Light, Dark
+- Popular: Dracula, Nord, Solarized, Gruvbox
+- Catppuccin: Latte, Frappé, Macchiato, Mocha
+- Tokyo Night: TokyoNight, TokyoNightStorm (default), TokyoNightLight
+- Kanagawa: Wave, Dragon, Lotus
+- Others: Moonfly, Nightfly, Oxocarbon, Ferra
 
 ## Design Patterns
 
@@ -400,6 +426,7 @@ mod tests {
 - `cursor.rs`: Cursor movement edge cases
 - `selection.rs`: Selection normalization and extraction
 - `update.rs`: Message handling and state transitions
+- `theme.rs`: All Iced themes, color adaptation, helper functions
 
 ### Integration Tests
 
