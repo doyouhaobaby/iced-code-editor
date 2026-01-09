@@ -25,11 +25,11 @@ extract_version() {
 # Extracts changelog section for a given version
 extract_changelog_section() {
     local version=$1
-    # Extract everything between "## $version" and the next "## " (or EOF)
+    # Extract everything between "## [$version]" and the next "## [" (or EOF)
     # Remove leading and trailing blank lines
-    sed -n "/^## $version/,/^## \[*[0-9]/{
-        /^## $version/d
-        /^## \[*[0-9]/d
+    sed -n "/^## \[$version\]/,/^## \[/{
+        /^## \[$version\]/d
+        /^## \[/d
         p
     }" "$CHANGELOG" | sed -e '/./,$!d' -e :a -e '/^\n*$/{$d;N;ba' -e '}'
 }
@@ -45,7 +45,7 @@ echo ""
 if [ -z "$1" ]; then
     echo "Usage: ./publish_release.sh \"Commit message\""
     echo ""
-    echo "Example: ./publish_release.sh \"Fix editor background overflow\""
+    echo "Example: ./publish_release.sh \"fix: editor background overflow\""
     exit 1
 fi
 COMMIT_MSG="$1"
@@ -81,10 +81,10 @@ fi
 echo "Version increment OK: $LAST_VERSION -> $VERSION"
 
 # 6. Verify changelog
-if ! grep -q "^## \[*$VERSION" "$CHANGELOG"; then
+if ! grep -q "^## \[$VERSION\]" "$CHANGELOG"; then
     echo ""
     echo "Error: $CHANGELOG does not contain section for version $VERSION"
-    echo "Expected line starting with: ## $VERSION or ## [$VERSION]"
+    echo "Expected line starting with: ## [$VERSION]"
     exit 1
 fi
 echo "Changelog section found for $VERSION"
