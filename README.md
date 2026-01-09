@@ -33,13 +33,13 @@ This crate provides a fully-featured code editor widget with syntax highlighting
 
 ## Planned features
 
-[ ] Line wrapping
-[ ] Search and replace
-[ ] Multiple cursors for simultaneous editing at multiple positions
-[ ] Collapse/expand blocks
-[ ] Indentation-based or syntax-aware
-[ ] Minimap
-[ ] Auto-completion
+- [ ] Search and replace
+- [ ] Line wrapping
+- [ ] Multiple cursors for simultaneous editing at multiple positions
+- [ ] Collapse/expand blocks
+- [ ] Indentation-based or syntax-aware
+- [ ] Minimap
+- [ ] Auto-completion
 
 ## Quick Start
 
