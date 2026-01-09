@@ -31,6 +31,16 @@ This crate provides a fully-featured code editor widget with syntax highlighting
 - **Native Iced theme support** - Automatically adapts to all 23+ built-in Iced themes
 - **High performance** canvas-based rendering
 
+## Planned features
+
+[ ] Line wrapping
+[ ] Search and replace
+[ ] Multiple cursors for simultaneous editing at multiple positions
+[ ] Collapse/expand blocks
+[ ] Indentation-based or syntax-aware
+[ ] Minimap
+[ ] Auto-completion
+
 ## Quick Start
 
 Add this to your `Cargo.toml`:
@@ -187,33 +197,7 @@ Message::Tick => {
 
 ## Themes
 
-The editor natively supports all built-in Iced themes with automatic color adaptation:
-
-### Supported Themes
-
-**Basic Themes:**
-
-- Light, Dark
-
-**Popular Color Schemes:**
-
-- Dracula, Nord, Solarized (Light/Dark), Gruvbox (Light/Dark)
-
-**Catppuccin Variants:**
-
-- Latte, Frappé, Macchiato, Mocha
-
-**Tokyo Night Variants:**
-
-- Tokyo Night, Tokyo Night Storm, Tokyo Night Light
-
-**Kanagawa Variants:**
-
-- Wave, Dragon, Lotus
-
-**Additional Themes:**
-
-- Moonfly, Nightfly, Oxocarbon, Ferra
+The editor natively supports all built-in Iced themes with automatic color adaptation.
 
 Each theme automatically provides:
 
