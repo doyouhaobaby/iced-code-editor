@@ -174,6 +174,12 @@ impl CodeEditor {
                 self.scroll_to_cursor()
             }
             Message::MouseClick(point) => {
+                // Capture focus when clicked
+                super::FOCUSED_EDITOR_ID.store(
+                    self.editor_id,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+
                 // End grouping on mouse click
                 if self.is_grouping {
                     self.history.end_group();

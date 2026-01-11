@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-None ;-)
+## [0.3.1] - 2026-01-11
+
+### Fixed
+
+- fix: duplicate char with two widgets on the window (#4)
+- fix: panic with not english chars (#3)
 
 ## [0.3.0] - 2026-01-09
 

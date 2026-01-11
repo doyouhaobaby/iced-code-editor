@@ -115,8 +115,17 @@ impl canvas::Program<Message> for CodeEditor {
                 // Draw text content with syntax highlighting
                 let full_line_content =
                     self.buffer.line(visual_line.logical_line);
-                let line_segment = &full_line_content
-                    [visual_line.start_col..visual_line.end_col];
+
+                // Convert character indices to byte indices for UTF-8 string slicing
+                let start_byte = full_line_content
+                    .char_indices()
+                    .nth(visual_line.start_col)
+                    .map_or(full_line_content.len(), |(idx, _)| idx);
+                let end_byte = full_line_content
+                    .char_indices()
+                    .nth(visual_line.end_col)
+                    .map_or(full_line_content.len(), |(idx, _)| idx);
+                let line_segment = &full_line_content[start_byte..end_byte];
 
                 if let Some(syntax) = syntax_ref {
                     let mut highlighter =
@@ -134,7 +143,7 @@ impl canvas::Program<Message> for CodeEditor {
                     let mut char_pos = 0;
 
                     for (style, text) in full_line_ranges {
-                        let text_len = text.len();
+                        let text_len = text.chars().count();
                         let text_end = char_pos + text_len;
 
                         // Check if this token intersects with our segment
@@ -151,8 +160,17 @@ impl canvas::Program<Message> for CodeEditor {
                             let text_end_offset = text_start_offset
                                 + (segment_end - segment_start);
 
-                            let segment_text =
-                                &text[text_start_offset..text_end_offset];
+                            // Convert character offsets to byte offsets for UTF-8 slicing
+                            let start_byte = text
+                                .char_indices()
+                                .nth(text_start_offset)
+                                .map_or(text.len(), |(idx, _)| idx);
+                            let end_byte = text
+                                .char_indices()
+                                .nth(text_end_offset)
+                                .map_or(text.len(), |(idx, _)| idx);
+
+                            let segment_text = &text[start_byte..end_byte];
 
                             let color = Color::from_rgb(
                                 f32::from(style.foreground.r) / 255.0,
@@ -169,7 +187,8 @@ impl canvas::Program<Message> for CodeEditor {
                                 ..canvas::Text::default()
                             });
 
-                            x_offset += segment_text.len() as f32 * CHAR_WIDTH;
+                            x_offset += segment_text.chars().count() as f32
+                                * CHAR_WIDTH;
                         }
 
                         char_pos = text_end;
@@ -463,6 +482,13 @@ impl canvas::Program<Message> for CodeEditor {
                 text,
                 ..
             }) => {
+                // Only process keyboard events if this editor has focus
+                let focused_id = super::FOCUSED_EDITOR_ID
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if focused_id != self.editor_id {
+                    return None;
+                }
+
                 // Handle Ctrl+C / Ctrl+Insert (copy)
                 if (modifiers.control()
                     && matches!(key, keyboard::Key::Character(c) if c.as_str() == "c"))

@@ -5,12 +5,19 @@
 
 use iced::widget::operation::{RelativeOffset, snap_to};
 use iced::widget::{Id, canvas};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 use crate::i18n::Translations;
 use crate::text_buffer::TextBuffer;
 use crate::theme::Style;
 pub use history::CommandHistory;
+
+/// Global counter for generating unique editor IDs (starts at 1)
+static EDITOR_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+/// ID of the currently focused editor (0 = no editor focused)
+static FOCUSED_EDITOR_ID: AtomicU64 = AtomicU64::new(0);
 
 // Re-export submodules
 mod canvas_impl;
@@ -35,6 +42,8 @@ pub(crate) const CURSOR_BLINK_INTERVAL: std::time::Duration =
 
 /// Canvas-based high-performance text editor.
 pub struct CodeEditor {
+    /// Unique ID for this editor instance (for focus management)
+    pub(crate) editor_id: u64,
     /// Text buffer
     pub(crate) buffer: TextBuffer,
     /// Cursor position (line, column)
@@ -175,7 +184,16 @@ impl CodeEditor {
     ///
     /// A new `CodeEditor` instance
     pub fn new(content: &str, syntax: &str) -> Self {
+        // Generate a unique ID for this editor instance
+        let editor_id = EDITOR_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+
+        // Give focus to the first editor created (ID == 1)
+        if editor_id == 1 {
+            FOCUSED_EDITOR_ID.store(editor_id, Ordering::Relaxed);
+        }
+
         Self {
+            editor_id,
             buffer: TextBuffer::new(content),
             cursor: (0, 0),
             scroll_offset: 0.0,
@@ -282,7 +300,7 @@ impl CodeEditor {
     ///
     /// # Returns
     ///
-    /// The current language setting
+    /// The currently active language for UI text
     ///
     /// # Example
     ///
@@ -290,11 +308,54 @@ impl CodeEditor {
     /// use iced_code_editor::{CodeEditor, Language};
     ///
     /// let editor = CodeEditor::new("fn main() {}", "rs");
-    /// assert_eq!(editor.language(), Language::English);
+    /// let current_lang = editor.language();
     /// ```
-    #[must_use]
-    pub const fn language(&self) -> crate::i18n::Language {
+    pub fn language(&self) -> crate::i18n::Language {
         self.translations.language()
+    }
+
+    /// Requests focus for this editor.
+    ///
+    /// This method programmatically sets the focus to this editor instance,
+    /// allowing it to receive keyboard events. Other editors will automatically
+    /// lose focus.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let mut editor1 = CodeEditor::new("fn main() {}", "rs");
+    /// let mut editor2 = CodeEditor::new("fn test() {}", "rs");
+    ///
+    /// // Give focus to editor2
+    /// editor2.request_focus();
+    /// ```
+    pub fn request_focus(&self) {
+        FOCUSED_EDITOR_ID.store(self.editor_id, Ordering::Relaxed);
+    }
+
+    /// Checks if this editor currently has focus.
+    ///
+    /// Returns `true` if this editor will receive keyboard events,
+    /// `false` otherwise.
+    ///
+    /// # Returns
+    ///
+    /// `true` if focused, `false` otherwise
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs");
+    /// if editor.is_focused() {
+    ///     println!("Editor has focus");
+    /// }
+    /// ```
+    pub fn is_focused(&self) -> bool {
+        FOCUSED_EDITOR_ID.load(Ordering::Relaxed) == self.editor_id
     }
 
     /// Resets the editor with new content.

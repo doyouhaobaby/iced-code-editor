@@ -14,7 +14,6 @@ use iced::widget::{
     row, scrollable, text,
 };
 use iced::{Color, Element, Length, Subscription, Task, Theme, window};
-use iced_aw::widget::drop_down::DropDown;
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, Language, theme};
 use std::path::PathBuf;
@@ -25,6 +24,13 @@ fn main() -> iced::Result {
         .subscription(DemoApp::subscription)
         .theme(DemoApp::theme)
         .run()
+}
+
+/// Identifier for which editor is being referenced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorId {
+    Left,
+    Right,
 }
 
 /// Wrapper for Language to implement Display trait for pick_list.
@@ -135,19 +141,29 @@ end
     }
 }
 
-/// Pane content types.
+impl std::fmt::Display for Template {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+/// Pane content types for the editor PaneGrid.
 #[derive(Debug, Clone, Copy)]
 enum PaneType {
-    Editor,
-    Output,
+    EditorLeft,
+    EditorRight,
 }
 
 /// Demo application state.
 struct DemoApp {
-    /// Code editor
-    editor: CodeEditor,
-    /// Current file path
-    current_file: Option<PathBuf>,
+    /// Left code editor
+    editor_left: CodeEditor,
+    /// Right code editor
+    editor_right: CodeEditor,
+    /// Current file path for left editor
+    current_file_left: Option<PathBuf>,
+    /// Current file path for right editor
+    current_file_right: Option<PathBuf>,
     /// Error message
     error_message: Option<String>,
     /// Current theme
@@ -156,19 +172,21 @@ struct DemoApp {
     current_language: Language,
     /// Pane grid state
     panes: pane_grid::State<PaneType>,
-    /// Dropdown expanded state
-    dropdown_expanded: bool,
     /// Log messages for output pane
     log_messages: Vec<String>,
-    /// Search/replace enabled flag
-    search_replace_enabled: bool,
+    /// Search/replace enabled flag for left editor
+    search_replace_enabled_left: bool,
+    /// Search/replace enabled flag for right editor
+    search_replace_enabled_right: bool,
+    /// Active editor (receives Open/Save/Run commands)
+    active_editor: EditorId,
 }
 
 /// Application messages.
 #[derive(Debug, Clone)]
 enum Message {
     /// Editor event
-    EditorEvent(EditorMessage),
+    EditorEvent(EditorId, EditorMessage),
     /// Open file
     OpenFile,
     /// File opened
@@ -187,18 +205,16 @@ enum Message {
     ThemeChanged(Theme),
     /// Pane resized
     PaneResized(pane_grid::ResizeEvent),
-    /// Toggle dropdown
-    DropdownToggle,
     /// Template selected
-    TemplateSelected(Template),
+    TemplateSelected(EditorId, Template),
     /// Clear log
     ClearLog,
     /// Run code (simulated)
     RunCode,
     /// Toggle line wrapping
-    ToggleWrap(bool),
+    ToggleWrap(EditorId, bool),
     /// Toggle search/replace
-    ToggleSearchReplace(bool),
+    ToggleSearchReplace(EditorId, bool),
 }
 
 impl DemoApp {
@@ -214,33 +230,38 @@ end
 greet("World")
 "#;
 
-        // Create vertical pane_grid with editor on top, output on bottom
-        let (mut panes, editor_pane) = pane_grid::State::new(PaneType::Editor);
-        // Split always succeeds when called on a valid pane
-        if let Some((_output_pane, _split)) = panes.split(
-            pane_grid::Axis::Horizontal,
-            editor_pane,
-            PaneType::Output,
+        // Create PaneGrid with two editors side by side
+        let (mut panes, left_pane) =
+            pane_grid::State::new(PaneType::EditorLeft);
+
+        // Split vertical to create EditorRight beside EditorLeft
+        if let Some((_right_pane, split_v)) = panes.split(
+            pane_grid::Axis::Vertical,
+            left_pane,
+            PaneType::EditorRight,
         ) {
-            // Split succeeded, panes is now configured
+            panes.resize(split_v, 0.5); // 50/50 between left and right editors
         }
 
         let log_messages = vec![
             "[INFO] Application started".to_string(),
-            "[INFO] Editor initialized with default content".to_string(),
+            "[INFO] Two editors initialized side by side".to_string(),
         ];
 
         (
             Self {
-                editor: CodeEditor::new(default_content, "lua"),
-                current_file: None,
+                editor_left: CodeEditor::new(default_content, "lua"),
+                editor_right: CodeEditor::new(default_content, "lua"),
+                current_file_left: None,
+                current_file_right: None,
                 error_message: None,
                 current_theme: Theme::TokyoNightStorm,
                 current_language: Language::English,
                 panes,
-                dropdown_expanded: false,
                 log_messages,
-                search_replace_enabled: true,
+                search_replace_enabled_left: true,
+                search_replace_enabled_right: true,
+                active_editor: EditorId::Left,
             },
             Task::none(),
         )
@@ -254,23 +275,55 @@ greet("World")
     /// Handles messages and updates the application state.
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::EditorEvent(event) => {
-                self.editor.update(&event).map(Message::EditorEvent)
+            Message::EditorEvent(editor_id, event) => {
+                let editor = match editor_id {
+                    EditorId::Left => &mut self.editor_left,
+                    EditorId::Right => &mut self.editor_right,
+                };
+                editor
+                    .update(&event)
+                    .map(move |e| Message::EditorEvent(editor_id, e))
             }
             Message::OpenFile => {
-                self.log("INFO", "Opening file dialog...");
+                self.log(
+                    "INFO",
+                    &format!(
+                        "Opening file for {:?} editor...",
+                        self.active_editor
+                    ),
+                );
                 Task::perform(open_file_dialog(), Message::FileOpened)
             }
             Message::FileOpened(result) => match result {
                 Ok((path, content)) => {
-                    self.log("INFO", &format!("Opened: {}", path.display()));
-                    let task = self.editor.reset(&content);
+                    self.log(
+                        "INFO",
+                        &format!(
+                            "Opened {} in {:?} editor",
+                            path.display(),
+                            self.active_editor
+                        ),
+                    );
+
+                    let (editor, current_file) = match self.active_editor {
+                        EditorId::Left => {
+                            (&mut self.editor_left, &mut self.current_file_left)
+                        }
+                        EditorId::Right => (
+                            &mut self.editor_right,
+                            &mut self.current_file_right,
+                        ),
+                    };
+
+                    let task = editor.reset(&content);
                     let style = theme::from_iced_theme(&self.current_theme);
-                    self.editor.set_theme(style);
-                    self.editor.mark_saved();
-                    self.current_file = Some(path);
+                    editor.set_theme(style);
+                    editor.mark_saved();
+                    *current_file = Some(path);
                     self.error_message = None;
-                    task.map(Message::EditorEvent)
+
+                    let active_editor = self.active_editor;
+                    task.map(move |e| Message::EditorEvent(active_editor, e))
                 }
                 Err(err) => {
                     self.log("ERROR", &err);
@@ -279,9 +332,17 @@ greet("World")
                 }
             },
             Message::SaveFile => {
-                if let Some(path) = self.current_file.clone() {
+                let current_file = match self.active_editor {
+                    EditorId::Left => self.current_file_left.clone(),
+                    EditorId::Right => self.current_file_right.clone(),
+                };
+                if let Some(path) = current_file {
                     self.log("INFO", &format!("Saving to: {}", path.display()));
-                    let content = self.editor.content();
+                    let editor = match self.active_editor {
+                        EditorId::Left => &self.editor_left,
+                        EditorId::Right => &self.editor_right,
+                    };
+                    let content = editor.content();
                     Task::perform(save_file(path, content), Message::FileSaved)
                 } else {
                     self.update(Message::SaveFileAs)
@@ -289,15 +350,29 @@ greet("World")
             }
             Message::SaveFileAs => {
                 self.log("INFO", "Opening save dialog...");
-                let content = self.editor.content();
+                let editor = match self.active_editor {
+                    EditorId::Left => &self.editor_left,
+                    EditorId::Right => &self.editor_right,
+                };
+                let content = editor.content();
                 Task::perform(save_file_as_dialog(content), Message::FileSaved)
             }
             Message::FileSaved(result) => {
                 match result {
                     Ok(path) => {
                         self.log("INFO", &format!("Saved: {}", path.display()));
-                        self.current_file = Some(path);
-                        self.editor.mark_saved();
+                        let (editor, current_file) = match self.active_editor {
+                            EditorId::Left => (
+                                &mut self.editor_left,
+                                &mut self.current_file_left,
+                            ),
+                            EditorId::Right => (
+                                &mut self.editor_right,
+                                &mut self.current_file_right,
+                            ),
+                        };
+                        *current_file = Some(path);
+                        editor.mark_saved();
                         self.error_message = None;
                     }
                     Err(err) => {
@@ -307,10 +382,17 @@ greet("World")
                 }
                 Task::none()
             }
-            Message::Tick => self
-                .editor
-                .update(&EditorMessage::Tick)
-                .map(Message::EditorEvent),
+            Message::Tick => {
+                let task_left = self
+                    .editor_left
+                    .update(&EditorMessage::Tick)
+                    .map(|e| Message::EditorEvent(EditorId::Left, e));
+                let task_right = self
+                    .editor_right
+                    .update(&EditorMessage::Tick)
+                    .map(|e| Message::EditorEvent(EditorId::Right, e));
+                Task::batch([task_left, task_right])
+            }
             Message::LanguageChanged(lang_option) => {
                 let new_language = lang_option.inner();
                 self.log(
@@ -318,35 +400,50 @@ greet("World")
                     &format!("UI Language changed to: {}", lang_option),
                 );
                 self.current_language = new_language;
-                self.editor.set_language(new_language);
+                self.editor_left.set_language(new_language);
+                self.editor_right.set_language(new_language);
                 Task::none()
             }
             Message::ThemeChanged(new_theme) => {
                 self.log("INFO", &format!("Theme changed to: {:?}", new_theme));
                 let style = theme::from_iced_theme(&new_theme);
                 self.current_theme = new_theme;
-                self.editor.set_theme(style);
+                self.editor_left.set_theme(style);
+                self.editor_right.set_theme(style);
                 Task::none()
             }
             Message::PaneResized(pane_grid::ResizeEvent { split, ratio }) => {
                 self.panes.resize(split, ratio);
                 Task::none()
             }
-            Message::DropdownToggle => {
-                self.dropdown_expanded = !self.dropdown_expanded;
-                Task::none()
-            }
-            Message::TemplateSelected(template) => {
+            Message::TemplateSelected(editor_id, template) => {
                 self.log(
                     "INFO",
-                    &format!("Template selected: {}", template.name()),
+                    &format!(
+                        "Template '{}' loaded in {:?} editor",
+                        template.name(),
+                        editor_id
+                    ),
                 );
-                let task = self.editor.reset(template.content());
+
+                let editor = match editor_id {
+                    EditorId::Left => &mut self.editor_left,
+                    EditorId::Right => &mut self.editor_right,
+                };
+
+                let task = editor.reset(template.content());
                 let style = theme::from_iced_theme(&self.current_theme);
-                self.editor.set_theme(style);
-                self.dropdown_expanded = false;
-                self.current_file = None;
-                task.map(Message::EditorEvent)
+                editor.set_theme(style);
+
+                match editor_id {
+                    EditorId::Left => {
+                        self.current_file_left = None;
+                    }
+                    EditorId::Right => {
+                        self.current_file_right = None;
+                    }
+                }
+                task.map(move |e| Message::EditorEvent(editor_id, e))
             }
             Message::ClearLog => {
                 self.log_messages.clear();
@@ -354,33 +451,67 @@ greet("World")
                 Task::none()
             }
             Message::RunCode => {
-                self.log("INFO", "Running code... (simulated)");
-                let line_count = self.editor.content().lines().count();
+                self.log(
+                    "INFO",
+                    &format!(
+                        "Running code from {:?} editor...",
+                        self.active_editor
+                    ),
+                );
+
+                let editor = match self.active_editor {
+                    EditorId::Left => &self.editor_left,
+                    EditorId::Right => &self.editor_right,
+                };
+
+                let line_count = editor.content().lines().count();
                 self.log("OUTPUT", &format!("Script has {} lines", line_count));
                 self.log("OUTPUT", "Execution completed (simulated)");
                 Task::none()
             }
-            Message::ToggleWrap(enabled) => {
+            Message::ToggleWrap(editor_id, enabled) => {
                 self.log(
                     "INFO",
                     &format!(
-                        "Line wrapping: {}",
-                        if enabled { "enabled" } else { "disabled" }
+                        "Line wrapping {} in {:?} editor",
+                        if enabled { "enabled" } else { "disabled" },
+                        editor_id
                     ),
                 );
-                self.editor.set_wrap_enabled(enabled);
+
+                let editor = match editor_id {
+                    EditorId::Left => &mut self.editor_left,
+                    EditorId::Right => &mut self.editor_right,
+                };
+
+                editor.set_wrap_enabled(enabled);
                 Task::none()
             }
-            Message::ToggleSearchReplace(enabled) => {
+            Message::ToggleSearchReplace(editor_id, enabled) => {
                 self.log(
                     "INFO",
                     &format!(
-                        "Search/Replace: {}",
-                        if enabled { "enabled" } else { "disabled" }
+                        "Search/Replace {} in {:?} editor",
+                        if enabled { "enabled" } else { "disabled" },
+                        editor_id
                     ),
                 );
-                self.search_replace_enabled = enabled;
-                self.editor.set_search_replace_enabled(enabled);
+
+                match editor_id {
+                    EditorId::Left => {
+                        self.search_replace_enabled_left = enabled
+                    }
+                    EditorId::Right => {
+                        self.search_replace_enabled_right = enabled
+                    }
+                }
+
+                let editor = match editor_id {
+                    EditorId::Left => &mut self.editor_left,
+                    EditorId::Right => &mut self.editor_right,
+                };
+
+                editor.set_search_replace_enabled(enabled);
                 Task::none()
             }
         }
@@ -441,28 +572,48 @@ greet("World")
             container(text("")).height(0)
         };
 
-        // Pane grid
-        let pane_grid =
+        // PaneGrid with two editors (resizable horizontally)
+        let editors_pane_grid =
             PaneGrid::new(&self.panes, |_id, pane, _is_maximized| {
                 let title_bar_style = palette.background.weak.color;
 
                 match pane {
-                    PaneType::Editor => {
+                    PaneType::EditorLeft => {
+                        let is_active = self.active_editor == EditorId::Left;
+                        let title_text = if is_active {
+                            "Editor (Left) ●"
+                        } else {
+                            "Editor (Left)"
+                        };
+
                         let title = pane_grid::TitleBar::new(
-                            text("Editor").style(move |_| text::Style {
-                                color: Some(text_color),
+                            text(title_text).style(move |_| text::Style {
+                                color: Some(if is_active {
+                                    Color::from_rgb(0.4, 0.8, 1.0)
+                                } else {
+                                    text_color
+                                }),
                             }),
                         )
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(
                                 title_bar_style,
                             )),
+                            border: if is_active {
+                                iced::Border {
+                                    color: Color::from_rgb(0.4, 0.8, 1.0),
+                                    width: 2.0,
+                                    radius: 0.0.into(),
+                                }
+                            } else {
+                                iced::Border::default()
+                            },
                             ..Default::default()
                         })
                         .padding(5);
 
                         pane_grid::Content::new(
-                            self.view_editor_pane(text_color),
+                            self.view_editor_pane(EditorId::Left, text_color),
                         )
                         .title_bar(title)
                         .style(move |_| {
@@ -474,22 +625,42 @@ greet("World")
                             }
                         })
                     }
-                    PaneType::Output => {
+                    PaneType::EditorRight => {
+                        let is_active = self.active_editor == EditorId::Right;
+                        let title_text = if is_active {
+                            "Editor (Right) ●"
+                        } else {
+                            "Editor (Right)"
+                        };
+
                         let title = pane_grid::TitleBar::new(
-                            text("Output").style(move |_| text::Style {
-                                color: Some(text_color),
+                            text(title_text).style(move |_| text::Style {
+                                color: Some(if is_active {
+                                    Color::from_rgb(0.4, 0.8, 1.0)
+                                } else {
+                                    text_color
+                                }),
                             }),
                         )
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(
                                 title_bar_style,
                             )),
+                            border: if is_active {
+                                iced::Border {
+                                    color: Color::from_rgb(0.4, 0.8, 1.0),
+                                    width: 2.0,
+                                    radius: 0.0.into(),
+                                }
+                            } else {
+                                iced::Border::default()
+                            },
                             ..Default::default()
                         })
                         .padding(5);
 
                         pane_grid::Content::new(
-                            self.view_output_pane(text_color),
+                            self.view_editor_pane(EditorId::Right, text_color),
                         )
                         .title_bar(title)
                         .style(move |_| {
@@ -504,12 +675,41 @@ greet("World")
                 }
             })
             .on_resize(10, Message::PaneResized)
-            .spacing(2);
+            .spacing(2)
+            .height(Length::FillPortion(7)); // 70% of available height
 
-        // Main layout
+        // Output view (separate from PaneGrid)
+        let title_bar_style = palette.background.weak.color;
+        let output_title = container(
+            text("Output")
+                .style(move |_| text::Style { color: Some(text_color) }),
+        )
+        .padding(5)
+        .width(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(iced::Background::Color(title_bar_style)),
+            ..Default::default()
+        });
+
+        let output_content = container(self.view_output_pane(text_color))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .style(move |_| container::Style {
+                background: Some(iced::Background::Color(
+                    palette.background.base.color,
+                )),
+                ..Default::default()
+            });
+
+        let output_view = column![output_title, output_content]
+            .spacing(0)
+            .width(Length::Fill)
+            .height(Length::FillPortion(3)); // 30% of available height
+
+        // Main layout: column with toolbar, error_bar, editors, and output
         container(
-            column![toolbar, error_bar, pane_grid]
-                .spacing(0)
+            column![toolbar, error_bar, editors_pane_grid, output_view]
+                .spacing(2)
                 .width(Length::Fill)
                 .height(Length::Fill),
         )
@@ -525,101 +725,60 @@ greet("World")
     }
 
     /// Renders the editor pane content.
-    fn view_editor_pane(&self, _text_color: Color) -> Element<'_, Message> {
-        // Dropdown button
-        let dropdown_text =
-            if self.dropdown_expanded { "Templates ^" } else { "Templates v" };
+    fn view_editor_pane(
+        &self,
+        editor_id: EditorId,
+        _text_color: Color,
+    ) -> Element<'_, Message> {
+        // Select data based on editor_id
+        let (editor, search_replace_enabled) = match editor_id {
+            EditorId::Left => {
+                (&self.editor_left, self.search_replace_enabled_left)
+            }
+            EditorId::Right => {
+                (&self.editor_right, self.search_replace_enabled_right)
+            }
+        };
 
-        let dropdown_button = button(text(dropdown_text).size(14))
-            .on_press(Message::DropdownToggle)
-            .padding(8);
-
-        // Dropdown overlay content
-        let template_buttons: Vec<Element<'_, Message>> = Template::ALL
-            .iter()
-            .map(|template| {
-                button(text(template.name()).size(14).width(Length::Fill))
-                    .on_press(Message::TemplateSelected(*template))
-                    .width(Length::Fill)
-                    .padding(8)
-                    .style(|theme: &iced::Theme, status| {
-                        let palette = theme.extended_palette();
-                        match status {
-                            iced::widget::button::Status::Hovered => {
-                                iced::widget::button::Style {
-                                    background: Some(iced::Background::Color(
-                                        palette.primary.weak.color,
-                                    )),
-                                    text_color: palette.primary.weak.text,
-                                    ..Default::default()
-                                }
-                            }
-                            _ => iced::widget::button::Style {
-                                background: Some(iced::Background::Color(
-                                    palette.background.base.color,
-                                )),
-                                text_color: palette.background.base.text,
-                                ..Default::default()
-                            },
-                        }
-                    })
-                    .into()
+        // Template picker using pick_list
+        let template_picker =
+            pick_list(Template::ALL, None::<Template>, move |template| {
+                Message::TemplateSelected(editor_id, template)
             })
-            .collect();
-
-        let dropdown_overlay =
-            container(column(template_buttons).spacing(0).width(Length::Fill))
-                .width(Length::Fixed(200.0))
-                .style(move |_| container::Style {
-                    background: Some(iced::Background::Color(Color::from_rgb(
-                        0.2, 0.2, 0.25,
-                    ))),
-                    border: iced::Border {
-                        color: Color::from_rgb(0.3, 0.3, 0.35),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                });
-
-        // DropDown widget from iced_aw
-        let dropdown = DropDown::new(
-            dropdown_button,
-            dropdown_overlay,
-            self.dropdown_expanded,
-        )
-        .on_dismiss(Message::DropdownToggle);
+            .placeholder("Choose template...")
+            .text_size(14);
 
         // Wrap checkbox
-        let wrap_checkbox = checkbox(self.editor.wrap_enabled())
+        let wrap_checkbox = checkbox(editor.wrap_enabled())
             .label("Line wrapping")
-            .on_toggle(Message::ToggleWrap)
+            .on_toggle(move |b| Message::ToggleWrap(editor_id, b))
             .text_size(14);
 
         // Search/replace checkbox
-        let search_replace_checkbox = checkbox(self.search_replace_enabled)
+        let search_replace_checkbox = checkbox(search_replace_enabled)
             .label("Allow search/replace")
-            .on_toggle(Message::ToggleSearchReplace)
+            .on_toggle(move |b| Message::ToggleSearchReplace(editor_id, b))
             .text_size(14);
 
         // Editor in a constrained container (400px height, clipped)
-        let editor_view =
-            container(self.editor.view().map(Message::EditorEvent))
-                .width(Length::Fill)
-                .clip(true)
-                .style(|_| container::Style {
-                    border: iced::Border {
-                        color: Color::from_rgb(0.3, 0.3, 0.35),
-                        width: 1.0,
-                        radius: 0.0.into(),
-                    },
-                    ..Default::default()
-                });
+        let editor_view = container(
+            editor.view().map(move |e| Message::EditorEvent(editor_id, e)),
+        )
+        .width(Length::Fill)
+        .clip(true)
+        .style(|_| container::Style {
+            border: iced::Border {
+                color: Color::from_rgb(0.3, 0.3, 0.35),
+                width: 1.0,
+                radius: 0.0.into(),
+            },
+            ..Default::default()
+        });
 
         container(
             column![
                 row![
-                    dropdown,
+                    template_picker,
                     Space::new().width(10),
                     wrap_checkbox,
                     Space::new().width(10),
@@ -713,15 +872,36 @@ greet("World")
 
     /// Returns the file status string.
     fn file_status(&self) -> String {
-        let file_name = self
-            .current_file
+        let left_name = self
+            .current_file_left
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+            .unwrap_or("New file");
+        let right_name = self
+            .current_file_right
             .as_ref()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
             .unwrap_or("New file");
 
-        let modified = if self.editor.is_modified() { " *" } else { "" };
-        format!("{}{}", file_name, modified)
+        let left_mod = if self.editor_left.is_modified() { "*" } else { "" };
+        let right_mod = if self.editor_right.is_modified() { "*" } else { "" };
+
+        let active_left =
+            if self.active_editor == EditorId::Left { "● " } else { "" };
+        let active_right =
+            if self.active_editor == EditorId::Right { " ●" } else { "" };
+
+        format!(
+            "{}L: {}{} | R: {}{}{}",
+            active_left,
+            left_name,
+            left_mod,
+            right_name,
+            right_mod,
+            active_right
+        )
     }
 }
 
