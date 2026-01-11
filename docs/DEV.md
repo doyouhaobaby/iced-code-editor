@@ -369,6 +369,7 @@ Message::Tick => {
     // Only process blinking if editor has focus (optimization)
     if self.is_focused() && self.last_blink.elapsed() >= CURSOR_BLINK_INTERVAL {
         self.cursor_visible = !self.cursor_visible;
+        self.last_blink = std::time::Instant::now();
         self.cache.clear();  // Force redraw
     }
 }
