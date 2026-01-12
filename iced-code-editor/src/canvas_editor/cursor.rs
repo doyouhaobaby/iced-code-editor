@@ -4,10 +4,8 @@ use iced::widget::operation::scroll_to;
 use iced::widget::scrollable;
 use iced::{Point, Task};
 
-use super::{
-    ArrowDirection, CHAR_WIDTH, CodeEditor, GUTTER_WIDTH, LINE_HEIGHT, Message,
-    wrapping::WrappingCalculator,
-};
+use super::wrapping::WrappingCalculator;
+use super::{ArrowDirection, CHAR_WIDTH, CodeEditor, LINE_HEIGHT, Message};
 
 impl CodeEditor {
     /// Moves the cursor based on arrow key direction.
@@ -21,8 +19,11 @@ impl CodeEditor {
                     self.wrap_enabled,
                     self.wrap_column,
                 );
-                let visual_lines = wrapping_calc
-                    .calculate_visual_lines(&self.buffer, self.viewport_width);
+                let visual_lines = wrapping_calc.calculate_visual_lines(
+                    &self.buffer,
+                    self.viewport_width,
+                    self.gutter_width(),
+                );
 
                 // Find current visual line
                 if let Some(current_visual) =
@@ -111,7 +112,7 @@ impl CodeEditor {
     /// Handles mouse click to position cursor.
     pub(crate) fn handle_mouse_click(&mut self, point: Point) {
         // Account for gutter width
-        if point.x < GUTTER_WIDTH {
+        if point.x < self.gutter_width() {
             return; // Clicked in gutter
         }
 
@@ -121,8 +122,11 @@ impl CodeEditor {
         // Use wrapping calculator to find logical position
         let wrapping_calc =
             WrappingCalculator::new(self.wrap_enabled, self.wrap_column);
-        let visual_lines = wrapping_calc
-            .calculate_visual_lines(&self.buffer, self.viewport_width);
+        let visual_lines = wrapping_calc.calculate_visual_lines(
+            &self.buffer,
+            self.viewport_width,
+            self.gutter_width(),
+        );
 
         if visual_line_idx >= visual_lines.len() {
             // Clicked beyond last line - move to end of document
@@ -136,7 +140,7 @@ impl CodeEditor {
         let visual_line = &visual_lines[visual_line_idx];
 
         // Calculate column within the segment
-        let x_in_text = point.x - GUTTER_WIDTH - 5.0;
+        let x_in_text = point.x - self.gutter_width() - 5.0;
         let col_offset = (x_in_text / CHAR_WIDTH).max(0.0) as usize;
         let col = (visual_line.start_col + col_offset).min(visual_line.end_col);
 
@@ -149,8 +153,11 @@ impl CodeEditor {
         // Use wrapping calculator to find visual line
         let wrapping_calc =
             WrappingCalculator::new(self.wrap_enabled, self.wrap_column);
-        let visual_lines = wrapping_calc
-            .calculate_visual_lines(&self.buffer, self.viewport_width);
+        let visual_lines = wrapping_calc.calculate_visual_lines(
+            &self.buffer,
+            self.viewport_width,
+            self.gutter_width(),
+        );
 
         let cursor_visual = WrappingCalculator::logical_to_visual(
             &visual_lines,
@@ -218,7 +225,7 @@ impl CodeEditor {
     /// Handles mouse drag for text selection.
     pub(crate) fn handle_mouse_drag(&mut self, point: Point) {
         // Account for gutter width
-        if point.x < GUTTER_WIDTH {
+        if point.x < self.gutter_width() {
             return;
         }
 
@@ -227,8 +234,11 @@ impl CodeEditor {
 
         let wrapping_calc =
             WrappingCalculator::new(self.wrap_enabled, self.wrap_column);
-        let visual_lines =
-            wrapping_calc.calculate_visual_lines(&self.buffer, 800.0);
+        let visual_lines = wrapping_calc.calculate_visual_lines(
+            &self.buffer,
+            800.0,
+            self.gutter_width(),
+        );
 
         if visual_line_idx >= visual_lines.len() {
             let last_line = self.buffer.line_count().saturating_sub(1);
@@ -240,7 +250,7 @@ impl CodeEditor {
 
         let visual_line = &visual_lines[visual_line_idx];
 
-        let x_in_text = point.x - GUTTER_WIDTH - 5.0;
+        let x_in_text = point.x - self.gutter_width() - 5.0;
         let col_offset = (x_in_text / CHAR_WIDTH).max(0.0) as usize;
         let col = (visual_line.start_col + col_offset).min(visual_line.end_col);
 

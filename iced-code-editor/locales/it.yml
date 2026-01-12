@@ -11,4 +11,4 @@ replace:
   all_tooltip: "Sostituisci tutto"
 
 settings:
-  case_sensitive_label: "Distingui maiuscole/minuscole"
+  case_sensitive_label: "Distingui maiuscole"

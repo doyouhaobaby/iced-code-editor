@@ -88,6 +88,8 @@ pub struct CodeEditor {
     pub(crate) translations: Translations,
     /// Whether search/replace functionality is enabled
     pub(crate) search_replace_enabled: bool,
+    /// Whether line numbers are displayed
+    pub(crate) line_numbers_enabled: bool,
 }
 
 /// Messages emitted by the code editor
@@ -216,6 +218,7 @@ impl CodeEditor {
             search_state: search::SearchState::new(),
             translations: Translations::default(),
             search_replace_enabled: true,
+            line_numbers_enabled: true,
         }
     }
 
@@ -564,5 +567,71 @@ impl CodeEditor {
     pub fn with_wrap_column(mut self, column: Option<usize>) -> Self {
         self.wrap_column = column;
         self
+    }
+
+    /// Sets whether line numbers are displayed.
+    ///
+    /// When disabled, the gutter is completely removed (0px width),
+    /// providing more space for code display.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether to display line numbers
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let mut editor = CodeEditor::new("fn main() {}", "rs");
+    /// editor.set_line_numbers_enabled(false); // Hide line numbers
+    /// ```
+    pub fn set_line_numbers_enabled(&mut self, enabled: bool) {
+        if self.line_numbers_enabled != enabled {
+            self.line_numbers_enabled = enabled;
+            self.cache.clear(); // Force redraw
+        }
+    }
+
+    /// Returns whether line numbers are displayed.
+    ///
+    /// # Returns
+    ///
+    /// `true` if line numbers are displayed, `false` otherwise
+    pub fn line_numbers_enabled(&self) -> bool {
+        self.line_numbers_enabled
+    }
+
+    /// Sets the line numbers display with builder pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether to display line numbers
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs")
+    ///     .with_line_numbers_enabled(false);
+    /// ```
+    #[must_use]
+    pub fn with_line_numbers_enabled(mut self, enabled: bool) -> Self {
+        self.line_numbers_enabled = enabled;
+        self
+    }
+
+    /// Returns the current gutter width based on whether line numbers are enabled.
+    ///
+    /// # Returns
+    ///
+    /// `GUTTER_WIDTH` if line numbers are enabled, `0.0` otherwise
+    pub(crate) fn gutter_width(&self) -> f32 {
+        if self.line_numbers_enabled { GUTTER_WIDTH } else { 0.0 }
     }
 }

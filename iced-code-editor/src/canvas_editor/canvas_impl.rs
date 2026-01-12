@@ -7,9 +7,9 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+use super::wrapping::WrappingCalculator;
 use super::{
-    ArrowDirection, CHAR_WIDTH, CodeEditor, FONT_SIZE, GUTTER_WIDTH,
-    LINE_HEIGHT, Message, wrapping::WrappingCalculator,
+    ArrowDirection, CHAR_WIDTH, CodeEditor, FONT_SIZE, LINE_HEIGHT, Message,
 };
 use iced::widget::canvas::Action;
 
@@ -28,10 +28,11 @@ impl canvas::Program<Message> for CodeEditor {
             // Initialize wrapping calculator
             let wrapping_calc =
                 WrappingCalculator::new(self.wrap_enabled, self.wrap_column);
-
-            // Calculate visual lines
-            let visual_lines = wrapping_calc
-                .calculate_visual_lines(&self.buffer, bounds.width);
+            let visual_lines = wrapping_calc.calculate_visual_lines(
+                &self.buffer,
+                bounds.width,
+                self.gutter_width(),
+            );
 
             // Calculate visible line range based on viewport for optimized rendering
             // Use bounds.height as fallback when viewport_height is not yet initialized
@@ -80,34 +81,42 @@ impl canvas::Program<Message> for CodeEditor {
                 // to ensure proper clipping when the pane is resized.
 
                 // Draw line number only for first segment
-                if visual_line.is_first_segment() {
-                    let line_num_text =
-                        format!("{:>4}", visual_line.logical_line + 1);
-                    frame.fill_text(canvas::Text {
-                        content: line_num_text,
-                        position: Point::new(5.0, y + 2.0),
-                        color: self.style.line_number_color,
-                        size: FONT_SIZE.into(),
-                        font: iced::Font::MONOSPACE,
-                        ..canvas::Text::default()
-                    });
-                } else {
-                    // Draw wrap indicator for continuation lines
-                    frame.fill_text(canvas::Text {
-                        content: "↪".to_string(),
-                        position: Point::new(GUTTER_WIDTH - 20.0, y + 2.0),
-                        color: self.style.line_number_color,
-                        size: FONT_SIZE.into(),
-                        font: iced::Font::MONOSPACE,
-                        ..canvas::Text::default()
-                    });
+                if self.line_numbers_enabled {
+                    if visual_line.is_first_segment() {
+                        let line_num_text =
+                            format!("{:>4}", visual_line.logical_line + 1);
+                        frame.fill_text(canvas::Text {
+                            content: line_num_text,
+                            position: Point::new(5.0, y + 2.0),
+                            color: self.style.line_number_color,
+                            size: FONT_SIZE.into(),
+                            font: iced::Font::MONOSPACE,
+                            ..canvas::Text::default()
+                        });
+                    } else {
+                        // Draw wrap indicator for continuation lines
+                        frame.fill_text(canvas::Text {
+                            content: "↪".to_string(),
+                            position: Point::new(
+                                self.gutter_width() - 20.0,
+                                y + 2.0,
+                            ),
+                            color: self.style.line_number_color,
+                            size: FONT_SIZE.into(),
+                            font: iced::Font::MONOSPACE,
+                            ..canvas::Text::default()
+                        });
+                    }
                 }
 
                 // Highlight current line (based on logical line)
                 if visual_line.logical_line == self.cursor.0 {
                     frame.fill_rectangle(
-                        Point::new(GUTTER_WIDTH, y),
-                        Size::new(bounds.width - GUTTER_WIDTH, LINE_HEIGHT),
+                        Point::new(self.gutter_width(), y),
+                        Size::new(
+                            bounds.width - self.gutter_width(),
+                            LINE_HEIGHT,
+                        ),
                         self.style.current_line_highlight,
                     );
                 }
@@ -139,7 +148,7 @@ impl canvas::Program<Message> for CodeEditor {
                         });
 
                     // Extract only the ranges that fall within our segment
-                    let mut x_offset = GUTTER_WIDTH + 5.0;
+                    let mut x_offset = self.gutter_width() + 5.0;
                     let mut char_pos = 0;
 
                     for (style, text) in full_line_ranges {
@@ -197,7 +206,10 @@ impl canvas::Program<Message> for CodeEditor {
                     // Fallback to plain text
                     frame.fill_text(canvas::Text {
                         content: line_segment.to_string(),
-                        position: Point::new(GUTTER_WIDTH + 5.0, y + 2.0),
+                        position: Point::new(
+                            self.gutter_width() + 5.0,
+                            y + 2.0,
+                        ),
                         color: self.style.text_color,
                         size: FONT_SIZE.into(),
                         font: iced::Font::MONOSPACE,
@@ -244,10 +256,10 @@ impl canvas::Program<Message> for CodeEditor {
                         if start_v == end_v {
                             // Match within same visual line
                             let y = start_v as f32 * LINE_HEIGHT;
-                            let x_start = GUTTER_WIDTH
+                            let x_start = self.gutter_width()
                                 + 5.0
                                 + search_match.col as f32 * CHAR_WIDTH;
-                            let x_end = GUTTER_WIDTH
+                            let x_end = self.gutter_width()
                                 + 5.0
                                 + (search_match.col + query_len) as f32
                                     * CHAR_WIDTH;
@@ -282,11 +294,11 @@ impl canvas::Program<Message> for CodeEditor {
                                     vl.end_col
                                 };
 
-                                let x_start = GUTTER_WIDTH
+                                let x_start = self.gutter_width()
                                     + 5.0
                                     + (sel_start_col - vl.start_col) as f32
                                         * CHAR_WIDTH;
-                                let x_end = GUTTER_WIDTH
+                                let x_end = self.gutter_width()
                                     + 5.0
                                     + (sel_end_col - vl.start_col) as f32
                                         * CHAR_WIDTH;
@@ -330,11 +342,12 @@ impl canvas::Program<Message> for CodeEditor {
                         if start_v == end_v {
                             // Selection within same visual line
                             let y = start_v as f32 * LINE_HEIGHT;
-                            let x_start = GUTTER_WIDTH
+                            let x_start = self.gutter_width()
                                 + 5.0
                                 + start.1 as f32 * CHAR_WIDTH;
-                            let x_end =
-                                GUTTER_WIDTH + 5.0 + end.1 as f32 * CHAR_WIDTH;
+                            let x_end = self.gutter_width()
+                                + 5.0
+                                + end.1 as f32 * CHAR_WIDTH;
 
                             frame.fill_rectangle(
                                 Point::new(x_start, y + 2.0),
@@ -362,11 +375,11 @@ impl canvas::Program<Message> for CodeEditor {
                                     vl.end_col
                                 };
 
-                                let x_start = GUTTER_WIDTH
+                                let x_start = self.gutter_width()
                                     + 5.0
                                     + (sel_start_col - vl.start_col) as f32
                                         * CHAR_WIDTH;
-                                let x_end = GUTTER_WIDTH
+                                let x_end = self.gutter_width()
                                     + 5.0
                                     + (sel_end_col - vl.start_col) as f32
                                         * CHAR_WIDTH;
@@ -421,11 +434,11 @@ impl canvas::Program<Message> for CodeEditor {
                                     vl.end_col
                                 };
 
-                            let x_start = GUTTER_WIDTH
+                            let x_start = self.gutter_width()
                                 + 5.0
                                 + (sel_start_col - vl.start_col) as f32
                                     * CHAR_WIDTH;
-                            let x_end = GUTTER_WIDTH
+                            let x_end = self.gutter_width()
                                 + 5.0
                                 + (sel_end_col - vl.start_col) as f32
                                     * CHAR_WIDTH;
@@ -451,7 +464,7 @@ impl canvas::Program<Message> for CodeEditor {
                     )
                 {
                     let vl = &visual_lines[cursor_visual];
-                    let cursor_x = GUTTER_WIDTH
+                    let cursor_x = self.gutter_width()
                         + 5.0
                         + (self.cursor.1 - vl.start_col) as f32 * CHAR_WIDTH;
                     let cursor_y = cursor_visual as f32 * LINE_HEIGHT;

@@ -155,7 +155,7 @@ The editor features smart command grouping - consecutive typing is grouped into 
 
 ### Changing Themes
 
-The editor automatically adapts to any Iced theme. All 23+ built-in Iced themes are supported:
+The editor uses **TokyoNightStorm** as the default theme. It automatically adapts to any Iced theme. All 23+ built-in Iced themes are supported:
 
 ```rust
 use iced_code_editor::theme;
@@ -188,22 +188,72 @@ if editor.is_modified() {
 editor.mark_saved();
 ```
 
-### Cursor Blinking
+### Enable/disable search/replace
 
-For cursor blinking animation, subscribe to window frames:
+The search/replace functionality is **enabled by default**. It can be toggled on or off. When disabled, search shortcuts (Ctrl+F, Ctrl+H, F3) are ignored and the search dialog is hidden:
 
 ```rust
-use iced::{Subscription, window};
+// Disable search/replace functionality
+editor.set_search_replace_enabled(false);
 
-fn subscription(&self) -> Subscription<Message> {
-    window::frames().map(|_| Message::Tick)
-}
+// Or use builder pattern during initialization
+let editor = CodeEditor::new("code", "rs")
+    .with_search_replace_enabled(false);
 
-// In your update function
-Message::Tick => {
-    self.editor.update(&EditorMessage::Tick).map(Message::EditorEvent)
+// Check current state
+if editor.search_replace_enabled() {
+    println!("Search and replace is available");
 }
 ```
+
+This is useful for read-only editors or when you want to provide your own search interface.
+
+### Enable/disable line wrapping
+
+Line wrapping is **enabled by default** at viewport width. Long lines can be wrapped automatically at the viewport width or at a fixed column:
+
+```rust
+// Enable line wrapping at viewport width
+editor.set_wrap_enabled(true);
+
+// Wrap at a fixed column (e.g., 80 characters)
+let editor = CodeEditor::new("code", "rs")
+    .with_wrap_enabled(true)
+    .with_wrap_column(Some(80));
+
+// Disable wrapping
+editor.set_wrap_enabled(false);
+
+// Check current state
+if editor.wrap_enabled() {
+    println!("Line wrapping is active");
+}
+```
+
+When enabled, wrapped lines show a continuation indicator (↪) in the line number gutter.
+
+### Enable/disable line numbers
+
+Line numbers are **displayed by default**. They can be hidden to maximize space for code:
+
+```rust
+// Hide line numbers
+editor.set_line_numbers_enabled(false);
+
+// Or use builder pattern during initialization
+let editor = CodeEditor::new("code", "rs")
+    .with_line_numbers_enabled(false);
+
+// Show line numbers (default behavior)
+editor.set_line_numbers_enabled(true);
+
+// Check current state
+if editor.line_numbers_enabled() {
+    println!("Line numbers are visible");
+}
+```
+
+When disabled, the gutter is completely removed (0px width), providing more horizontal space for code display.
 
 ## Themes
 

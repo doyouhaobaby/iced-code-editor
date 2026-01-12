@@ -20,8 +20,11 @@ impl CodeEditor {
             WrappingCalculator::new(self.wrap_enabled, self.wrap_column);
 
         // Use viewport width for calculating visual lines
-        let visual_lines = wrapping_calc
-            .calculate_visual_lines(&self.buffer, self.viewport_width);
+        let visual_lines = wrapping_calc.calculate_visual_lines(
+            &self.buffer,
+            self.viewport_width,
+            self.gutter_width(),
+        );
 
         let total_visual_lines = visual_lines.len();
         let content_height = total_visual_lines as f32 * LINE_HEIGHT;
@@ -97,14 +100,22 @@ impl CodeEditor {
             });
 
         // Gutter background container (fixed width, clipped by parent)
-        let gutter_container =
-            container(Space::new().width(Length::Fill).height(Length::Fill))
+        // Only create if line numbers are enabled
+        let gutter_container = if self.line_numbers_enabled {
+            Some(
+                container(
+                    Space::new().width(Length::Fill).height(Length::Fill),
+                )
                 .width(Length::Fixed(GUTTER_WIDTH))
                 .height(Length::Fill)
                 .style(move |_| container::Style {
                     background: Some(Background::Color(gutter_background)),
                     ..container::Style::default()
-                });
+                }),
+            )
+        } else {
+            None
+        };
 
         // Code background container (fills remaining width)
         let code_background_container =
@@ -118,12 +129,16 @@ impl CodeEditor {
 
         // Main layout: use a Stack to layer the backgrounds behind the scrollable
         // The scrollable has a transparent background so the colors show through
+        let background_row = if let Some(gutter) = gutter_container {
+            Row::new().push(gutter).push(code_background_container)
+        } else {
+            Row::new().push(code_background_container)
+        };
+
         let mut editor_stack = iced::widget::Stack::new()
             .push(
                 // Background layer (bottom): gutter + code backgrounds
-                Row::new()
-                    .push(gutter_container)
-                    .push(code_background_container),
+                background_row,
             )
             .push(
                 // Scrollable layer (top) - transparent, overlays the backgrounds

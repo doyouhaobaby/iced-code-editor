@@ -7,14 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- feat: hide/display line numbers ([#5](https://github.com/LuDog71FR/iced-code-editor/issues/5))
 - feat: hide cursor if editor don't have the focus.
 
 ## [0.3.1] - 2026-01-11
 
 ### Fixed
 
-- fix: duplicate char with two widgets on the window (#4)
-- fix: panic with not english chars (#3)
+- fix: duplicate char with two widgets on the window ([#4](https://github.com/LuDog71FR/iced-code-editor/issues/4))
+- fix: panic with not english chars ([#3](https://github.com/LuDog71FR/iced-code-editor/issues/3))
+
 
 ## [0.3.0] - 2026-01-09
 
@@ -76,7 +78,7 @@ fix: canvas background now respects viewport height instead of content height
 
 ### Added
 
-- Add html, xml, css, json and md languages (#2).
+- Add html, xml, css, json and md languages ([#2](https://github.com/LuDog71FR/iced-code-editor/issues/2)).
 
 ## [0.2.4] - 2025-12-27
 

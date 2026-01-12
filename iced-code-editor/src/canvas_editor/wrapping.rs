@@ -6,7 +6,7 @@
 
 use crate::text_buffer::TextBuffer;
 
-use super::{CHAR_WIDTH, GUTTER_WIDTH};
+use super::CHAR_WIDTH;
 
 /// Represents a visual line segment in the editor.
 ///
@@ -93,6 +93,7 @@ impl WrappingCalculator {
     ///
     /// * `text_buffer` - The text buffer to wrap
     /// * `viewport_width` - Width of the viewport in pixels (used if wrap_column is None)
+    /// * `gutter_width` - Width of the line number gutter in pixels (subtracted from available width)
     ///
     /// # Returns
     ///
@@ -101,6 +102,7 @@ impl WrappingCalculator {
         &self,
         text_buffer: &TextBuffer,
         viewport_width: f32,
+        gutter_width: f32,
     ) -> Vec<VisualLine> {
         if !self.wrap_enabled {
             // No wrapping: one visual line per logical line
@@ -112,7 +114,8 @@ impl WrappingCalculator {
         }
 
         // Calculate wrap width in characters
-        let wrap_width = self.calculate_wrap_width(viewport_width);
+        let wrap_width =
+            self.calculate_wrap_width(viewport_width, gutter_width);
 
         let mut visual_lines = Vec::new();
 
@@ -193,16 +196,21 @@ impl WrappingCalculator {
     /// # Arguments
     ///
     /// * `viewport_width` - Width of the viewport in pixels
+    /// * `gutter_width` - Width of the gutter in pixels
     ///
     /// # Returns
     ///
     /// Maximum number of characters per line
-    fn calculate_wrap_width(&self, viewport_width: f32) -> usize {
+    fn calculate_wrap_width(
+        &self,
+        viewport_width: f32,
+        gutter_width: f32,
+    ) -> usize {
         match self.wrap_column {
             Some(col) => col,
             None => {
                 // Calculate based on viewport width
-                let available_width = viewport_width - GUTTER_WIDTH - 10.0; // Margins
+                let available_width = viewport_width - gutter_width - 10.0; // Margins
                 let chars = (available_width / CHAR_WIDTH) as usize;
                 chars.max(20) // Minimum 20 characters
             }
@@ -218,7 +226,7 @@ mod tests {
     fn test_no_wrap_when_disabled() {
         let buffer = TextBuffer::new("line 1\nline 2\nline 3");
         let calc = WrappingCalculator::new(false, None);
-        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0);
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
 
         assert_eq!(visual_lines.len(), 3);
         assert_eq!(visual_lines[0].logical_line, 0);
@@ -231,7 +239,7 @@ mod tests {
         let buffer =
             TextBuffer::new("this is a very long line that should be wrapped");
         let calc = WrappingCalculator::new(true, Some(10));
-        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0);
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
 
         // Line is 47 chars, should wrap into 5 segments (10+10+10+10+7)
         assert_eq!(visual_lines.len(), 5);
@@ -248,7 +256,7 @@ mod tests {
         let buffer =
             TextBuffer::new("short\nthis is a very long line that wraps\nend");
         let calc = WrappingCalculator::new(true, Some(15));
-        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0);
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
 
         // First line (short) - no wrap
         assert_eq!(
@@ -279,7 +287,7 @@ mod tests {
     fn test_wrap_empty_lines() {
         let buffer = TextBuffer::new("line1\n\nline3");
         let calc = WrappingCalculator::new(true, Some(10));
-        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0);
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
 
         assert_eq!(visual_lines.len(), 3);
         assert_eq!(visual_lines[1].logical_line, 1);
@@ -291,7 +299,7 @@ mod tests {
         let long_text = "a".repeat(100);
         let buffer = TextBuffer::new(&long_text);
         let calc = WrappingCalculator::new(true, Some(20));
-        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0);
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
 
         // 100 chars / 20 per line = 5 lines
         assert_eq!(visual_lines.len(), 5);

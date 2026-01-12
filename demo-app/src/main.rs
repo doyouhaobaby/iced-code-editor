@@ -178,6 +178,10 @@ struct DemoApp {
     search_replace_enabled_left: bool,
     /// Search/replace enabled flag for right editor
     search_replace_enabled_right: bool,
+    /// Line numbers enabled flag for left editor
+    line_numbers_enabled_left: bool,
+    /// Line numbers enabled flag for right editor
+    line_numbers_enabled_right: bool,
     /// Active editor (receives Open/Save/Run commands)
     active_editor: EditorId,
 }
@@ -215,6 +219,8 @@ enum Message {
     ToggleWrap(EditorId, bool),
     /// Toggle search/replace
     ToggleSearchReplace(EditorId, bool),
+    /// Toggle line numbers
+    ToggleLineNumbers(EditorId, bool),
 }
 
 impl DemoApp {
@@ -261,6 +267,8 @@ greet("World")
                 log_messages,
                 search_replace_enabled_left: true,
                 search_replace_enabled_right: true,
+                line_numbers_enabled_left: true,
+                line_numbers_enabled_right: true,
                 active_editor: EditorId::Left,
             },
             Task::none(),
@@ -514,6 +522,31 @@ greet("World")
                 editor.set_search_replace_enabled(enabled);
                 Task::none()
             }
+            Message::ToggleLineNumbers(editor_id, enabled) => {
+                self.log(
+                    "INFO",
+                    &format!(
+                        "Line numbers {} in {:?} editor",
+                        if enabled { "enabled" } else { "disabled" },
+                        editor_id
+                    ),
+                );
+
+                match editor_id {
+                    EditorId::Left => self.line_numbers_enabled_left = enabled,
+                    EditorId::Right => {
+                        self.line_numbers_enabled_right = enabled
+                    }
+                }
+
+                let editor = match editor_id {
+                    EditorId::Left => &mut self.editor_left,
+                    EditorId::Right => &mut self.editor_right,
+                };
+
+                editor.set_line_numbers_enabled(enabled);
+                Task::none()
+            }
         }
     }
 
@@ -691,14 +724,19 @@ greet("World")
         _text_color: Color,
     ) -> Element<'_, Message> {
         // Select data based on editor_id
-        let (editor, search_replace_enabled) = match editor_id {
-            EditorId::Left => {
-                (&self.editor_left, self.search_replace_enabled_left)
-            }
-            EditorId::Right => {
-                (&self.editor_right, self.search_replace_enabled_right)
-            }
-        };
+        let (editor, search_replace_enabled, line_numbers_enabled) =
+            match editor_id {
+                EditorId::Left => (
+                    &self.editor_left,
+                    self.search_replace_enabled_left,
+                    self.line_numbers_enabled_left,
+                ),
+                EditorId::Right => (
+                    &self.editor_right,
+                    self.search_replace_enabled_right,
+                    self.line_numbers_enabled_right,
+                ),
+            };
 
         // Template picker using pick_list
         let template_picker =
@@ -718,6 +756,12 @@ greet("World")
         let search_replace_checkbox = checkbox(search_replace_enabled)
             .label("Allow search/replace")
             .on_toggle(move |b| Message::ToggleSearchReplace(editor_id, b))
+            .text_size(14);
+
+        // Line numbers checkbox
+        let line_numbers_checkbox = checkbox(line_numbers_enabled)
+            .label("Show line numbers")
+            .on_toggle(move |b| Message::ToggleLineNumbers(editor_id, b))
             .text_size(14);
 
         // Editor in a constrained container (400px height, clipped)
@@ -742,7 +786,9 @@ greet("World")
                     Space::new().width(10),
                     wrap_checkbox,
                     Space::new().width(10),
-                    search_replace_checkbox
+                    search_replace_checkbox,
+                    Space::new().width(10),
+                    line_numbers_checkbox
                 ]
                 .padding(10),
                 editor_view,
