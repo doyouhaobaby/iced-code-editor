@@ -36,7 +36,7 @@ mod wrapping;
 pub(crate) const FONT_SIZE: f32 = 14.0;
 pub(crate) const LINE_HEIGHT: f32 = 20.0;
 pub(crate) const CHAR_WIDTH: f32 = 8.4; // Monospace character width
-pub(crate) const GUTTER_WIDTH: f32 = 60.0;
+pub(crate) const GUTTER_WIDTH: f32 = 45.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(530);
 

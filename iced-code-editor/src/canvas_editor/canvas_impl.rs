@@ -83,11 +83,15 @@ impl canvas::Program<Message> for CodeEditor {
                 // Draw line number only for first segment
                 if self.line_numbers_enabled {
                     if visual_line.is_first_segment() {
-                        let line_num_text =
-                            format!("{:>4}", visual_line.logical_line + 1);
+                        let line_num = visual_line.logical_line + 1;
+                        let line_num_text = format!("{}", line_num);
+                        // Calculate actual text width and center in gutter
+                        let digit_count = line_num_text.len() as f32;
+                        let text_width = digit_count * CHAR_WIDTH;
+                        let x_pos = (self.gutter_width() - text_width) / 2.0;
                         frame.fill_text(canvas::Text {
                             content: line_num_text,
-                            position: Point::new(5.0, y + 2.0),
+                            position: Point::new(x_pos, y + 2.0),
                             color: self.style.line_number_color,
                             size: FONT_SIZE.into(),
                             font: iced::Font::MONOSPACE,

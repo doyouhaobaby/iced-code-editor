@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- fix: reduce gutter for line numbers
 - feat: hide/display line numbers ([#5](https://github.com/LuDog71FR/iced-code-editor/issues/5))
 - feat: hide cursor if editor don't have the focus.
 
