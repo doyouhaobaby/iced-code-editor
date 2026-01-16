@@ -7,6 +7,14 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+fn is_cursor_in_bounds(cursor: &mouse::Cursor, bounds: Rectangle) -> bool {
+    match cursor {
+        mouse::Cursor::Available(point) => bounds.contains(*point),
+        mouse::Cursor::Levitating(point) => bounds.contains(*point),
+        mouse::Cursor::Unavailable => false,
+    }
+}
+
 use super::wrapping::WrappingCalculator;
 use super::{
     ArrowDirection, CHAR_WIDTH, CodeEditor, FONT_SIZE, LINE_HEIGHT, Message,
@@ -458,7 +466,7 @@ impl canvas::Program<Message> for CodeEditor {
             }
 
             // Draw cursor (only when editor has focus)
-            if self.cursor_visible && self.is_focused() {
+            if self.show_cursor && self.cursor_visible && self.is_focused() {
                 // Find the visual line containing the cursor
                 if let Some(cursor_visual) =
                     WrappingCalculator::logical_to_visual(
@@ -506,7 +514,17 @@ impl canvas::Program<Message> for CodeEditor {
                     return None;
                 }
 
-                // Handle Ctrl+C / Ctrl+Insert (copy)
+                // Cursor outside canvas bounds
+                if !is_cursor_in_bounds(&cursor, bounds) {
+                   return None;
+                }
+
+                // Only process keyboard events if canvas has focus
+               if !self.has_canvas_focus {
+                   return None;
+                }
+
+               // Handle Ctrl+C / Ctrl+Insert (copy)
                 if (modifiers.control()
                     && matches!(key, keyboard::Key::Character(c) if c.as_str() == "c"))
                     || (modifiers.control()

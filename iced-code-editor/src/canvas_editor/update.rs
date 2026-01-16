@@ -192,6 +192,11 @@ impl CodeEditor {
                 self.clear_selection();
                 self.is_dragging = true;
                 self.selection_start = Some(self.cursor);
+
+                // Gain canvas focus
+                self.has_canvas_focus = true;
+                self.show_cursor = true;
+
                 Task::none()
             }
             Message::MouseDrag(point) => {
@@ -243,12 +248,19 @@ impl CodeEditor {
             Message::Tick => {
                 // Handle cursor blinking only if editor has focus
                 if self.is_focused()
+                    && self.has_canvas_focus
                     && self.last_blink.elapsed() >= CURSOR_BLINK_INTERVAL
                 {
                     self.cursor_visible = !self.cursor_visible;
                     self.last_blink = std::time::Instant::now();
                     self.cache.clear();
                 }
+
+                // Hide cursor if canvas doesn't have focus
+                if !self.has_canvas_focus {
+                    self.show_cursor = false;
+                }
+
                 Task::none()
             }
             Message::PageUp => {
@@ -533,6 +545,19 @@ impl CodeEditor {
                         focus(self.search_state.replace_input_id.clone())
                     }
                 }
+            }
+            Message::CanvasFocusGained => {
+                self.has_canvas_focus = true;
+                self.show_cursor = true;
+                self.reset_cursor_blink();
+                self.cache.clear();
+                Task::none()
+            }
+            Message::CanvasFocusLost => {
+                self.has_canvas_focus = false;
+                self.show_cursor = false;
+                self.cache.clear();
+                Task::none()
             }
         }
     }
@@ -904,5 +929,42 @@ mod tests {
         assert_eq!(editor.buffer.line(0), "line3");
         assert_eq!(editor.cursor, (0, 2));
         assert_eq!(editor.selection_start, None);
+    }
+
+    #[test]
+    fn test_canvas_focus_gained() {
+        let mut editor = CodeEditor::new("hello world", "py");
+        assert!(!editor.has_canvas_focus);
+        assert!(!editor.show_cursor);
+
+        let _ = editor.update(&Message::CanvasFocusGained);
+
+        assert!(editor.has_canvas_focus);
+        assert!(editor.show_cursor);
+    }
+
+    #[test]
+    fn test_canvas_focus_lost() {
+        let mut editor = CodeEditor::new("hello world", "py");
+        editor.has_canvas_focus = true;
+        editor.show_cursor = true;
+
+        let _ = editor.update(&Message::CanvasFocusLost);
+
+        assert!(!editor.has_canvas_focus);
+        assert!(!editor.show_cursor);
+    }
+
+    #[test]
+    fn test_mouse_click_gains_focus() {
+        let mut editor = CodeEditor::new("hello world", "py");
+        editor.has_canvas_focus = false;
+        editor.show_cursor = false;
+
+        let _ =
+            editor.update(&Message::MouseClick(iced::Point::new(100.0, 10.0)));
+
+        assert!(editor.has_canvas_focus);
+        assert!(editor.show_cursor);
     }
 }

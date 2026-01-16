@@ -90,6 +90,10 @@ pub struct CodeEditor {
     pub(crate) search_replace_enabled: bool,
     /// Whether line numbers are displayed
     pub(crate) line_numbers_enabled: bool,
+    /// Whether the canvas has user input focus (for keyboard events)
+    pub(crate) has_canvas_focus: bool,
+    /// Whether to show the cursor (for rendering)
+    pub(crate) show_cursor: bool,
 }
 
 /// Messages emitted by the code editor
@@ -163,6 +167,10 @@ pub enum Message {
     SearchDialogTab,
     /// Shift+Tab pressed in search dialog (cycle backward)
     SearchDialogShiftTab,
+    /// Canvas gained focus (mouse click)
+    CanvasFocusGained,
+    /// Canvas lost focus (external widget interaction)
+    CanvasFocusLost,
 }
 
 /// Arrow key directions
@@ -219,6 +227,8 @@ impl CodeEditor {
             translations: Translations::default(),
             search_replace_enabled: true,
             line_numbers_enabled: true,
+            has_canvas_focus: false,
+            show_cursor: false,
         }
     }
 
@@ -633,5 +643,26 @@ impl CodeEditor {
     /// `GUTTER_WIDTH` if line numbers are enabled, `0.0` otherwise
     pub(crate) fn gutter_width(&self) -> f32 {
         if self.line_numbers_enabled { GUTTER_WIDTH } else { 0.0 }
+    }
+
+    /// Removes canvas focus from this editor.
+    ///
+    /// This method programmatically removes focus from the canvas, preventing
+    /// it from receiving keyboard events. The cursor will be hidden, but the
+    /// selection will remain visible.
+    ///
+    /// Call this when focus should move to another widget (e.g., text input).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let mut editor = CodeEditor::new("fn main() {}", "rs");
+    /// editor.lose_focus();
+    /// ```
+    pub fn lose_focus(&mut self) {
+        self.has_canvas_focus = false;
+        self.show_cursor = false;
     }
 }

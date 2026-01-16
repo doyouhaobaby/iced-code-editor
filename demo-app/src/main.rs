@@ -9,9 +9,10 @@
 //! Remarks:
 //! This layout is designed to test overflow and z-index issues.
 
+use iced::widget::pane_grid::{Content, TitleBar};
 use iced::widget::{
-    PaneGrid, Space, button, checkbox, column, container, pane_grid, pick_list,
-    row, scrollable, text, text_input,
+    PaneGrid, Space, button, checkbox, column, container, mouse_area,
+    pane_grid, pick_list, row, scrollable, text, text_input,
 };
 use iced::{Color, Element, Length, Subscription, Task, Theme, window};
 use iced_code_editor::Message as EditorMessage;
@@ -225,6 +226,8 @@ enum Message {
     ToggleLineNumbers(EditorId, bool),
     /// Test text input changed
     TextInputChanged(String),
+    /// Test text input clicked
+    TextInputClicked,
 }
 
 impl DemoApp {
@@ -239,7 +242,6 @@ end
 
 greet("World")
 "#;
-
         // Create PaneGrid with two editors side by side
         let (mut panes, left_pane) =
             pane_grid::State::new(PaneType::EditorLeft);
@@ -554,14 +556,22 @@ greet("World")
                 Task::none()
             }
             Message::TextInputChanged(value) => {
-                self.text_input_value = value;
-                Task::none()
+               self.text_input_value = value;
+                // Immediately lose focus to prevent race condition with keyboard events
+                self.editor_left.lose_focus();
+                self.editor_right.lose_focus();
+               Task::none()
+            }
+            Message::TextInputClicked => {
+               self.editor_left.lose_focus();
+                self.editor_right.lose_focus();
+               Task::none()
             }
         }
     }
 
     /// Subscription for periodic updates.
-    fn subscription(&self) -> Subscription<Message> {
+    fn subscription(_state: &Self) -> Subscription<Message> {
         // Cursor blink
         window::frames().map(|_| Message::Tick)
     }
@@ -585,9 +595,12 @@ greet("World")
             text(self.file_status())
                 .style(move |_| text::Style { color: Some(text_color) }),
             Space::new().width(Length::Fill),
-            text_input("Test input...", &self.text_input_value)
-                .on_input(Message::TextInputChanged)
-                .width(200),
+            mouse_area(
+                text_input("Test input...", &self.text_input_value)
+                    .on_input(Message::TextInputChanged)
+                    .width(200)
+            )
+            .on_press(Message::TextInputClicked),
             Space::new().width(10),
             text("Language:")
                 .style(move |_| text::Style { color: Some(text_color) }),
@@ -626,11 +639,9 @@ greet("World")
 
                 match pane {
                     PaneType::EditorLeft => {
-                        let title = pane_grid::TitleBar::new(
-                            text("Editor (Left)").style(move |_| text::Style {
-                                color: Some(text_color),
-                            }),
-                        )
+                        let title = TitleBar::new(text("Editor (Left)").style(
+                            move |_| text::Style { color: Some(text_color) },
+                        ))
                         .style(move |_| container::Style {
                             background: Some(iced::Background::Color(
                                 title_bar_style,
@@ -639,7 +650,7 @@ greet("World")
                         })
                         .padding(5);
 
-                        pane_grid::Content::new(
+                        Content::new(
                             self.view_editor_pane(EditorId::Left, text_color),
                         )
                         .title_bar(title)
@@ -653,7 +664,7 @@ greet("World")
                         })
                     }
                     PaneType::EditorRight => {
-                        let title = pane_grid::TitleBar::new(
+                        let title = TitleBar::new(
                             text("Editor (Right)").style(move |_| {
                                 text::Style { color: Some(text_color) }
                             }),
@@ -666,7 +677,7 @@ greet("World")
                         })
                         .padding(5);
 
-                        pane_grid::Content::new(
+                        Content::new(
                             self.view_editor_pane(EditorId::Right, text_color),
                         )
                         .title_bar(title)
