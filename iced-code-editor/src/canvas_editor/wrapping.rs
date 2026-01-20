@@ -141,8 +141,8 @@ impl WrappingCalculator {
                 // Compute pixel width for the current character
                 let char_width = match c.width() {
                     Some(w) if w > 1 => FONT_SIZE, // wide characters (e.g. CJK)
-                    Some(_) => CHAR_WIDTH,         // narrow characters (e.g. Latin)
-                    None => 0.0,                   // control characters
+                    Some(_) => CHAR_WIDTH, // narrow characters (e.g. Latin)
+                    None => 0.0,           // control characters
                 };
 
                 // If adding the current character exceeds wrap width, wrap at the previous char.

@@ -658,7 +658,7 @@ impl canvas::Program<Message> for CodeEditor {
                 // - has_canvas_focus: internal focus state (mouse clicks, etc.)
                 // - draw only when both are true to avoid ghost cursors
                 // ---------------------------------------------------------------------
-                
+
                 // Map logical cursor position (Line, Col) to visual line index
                 // to handle line wrapping changes
                 if let Some(cursor_visual) =

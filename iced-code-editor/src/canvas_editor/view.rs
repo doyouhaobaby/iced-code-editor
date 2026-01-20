@@ -2,13 +2,13 @@
 
 use iced::advanced::input_method;
 use iced::advanced::widget::{Widget, tree};
+use iced::advanced::{Renderer, Shell};
 use iced::widget::canvas::Canvas;
 use iced::widget::{Row, Scrollable, Space, container, scrollable};
 use iced::{
     Background, Border, Color, Element, Event, Length, Rectangle, Shadow,
 };
 use iced::{Size, Vector, mouse, window};
-use iced::advanced::{Renderer, Shell};
 
 use super::search_dialog;
 use super::wrapping::WrappingCalculator;
@@ -19,7 +19,7 @@ struct ImeRequester {
     // -------------------------------------------------------------------------
     // IME requester state fields
     // -------------------------------------------------------------------------
-    
+
     // Whether IME is enabled
     // Logic: true only when the editor has both Iced focus (is_focused) and
     // internal canvas focus (has_canvas_focus). This maps to the
