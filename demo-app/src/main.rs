@@ -18,12 +18,21 @@ use iced::{Color, Element, Length, Subscription, Task, Theme, window};
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, Language, theme};
 use std::path::PathBuf;
+mod fonts;
 
 /// Main entry point for the demo application.
 fn main() -> iced::Result {
+    let settings = iced::Settings {
+        // Uncomment to use JetBrains Mono font
+        // default_font: iced::Font::with_name("JetBrains Mono"),
+        fonts: fonts::load_all(),
+        ..Default::default()
+    };
+
     iced::application(DemoApp::new, DemoApp::update, DemoApp::view)
         .subscription(DemoApp::subscription)
         .theme(DemoApp::theme)
+        .settings(settings)
         .run()
 }
 
@@ -39,7 +48,7 @@ enum EditorId {
 struct LanguageOption(Language);
 
 impl LanguageOption {
-    const ALL: [LanguageOption; 7] = [
+    const ALL: [LanguageOption; 8] = [
         LanguageOption(Language::German),
         LanguageOption(Language::English),
         LanguageOption(Language::Spanish),
@@ -47,6 +56,7 @@ impl LanguageOption {
         LanguageOption(Language::Italian),
         LanguageOption(Language::PortugueseBR),
         LanguageOption(Language::PortuguesePT),
+        LanguageOption(Language::ChineseSimplified),
     ];
 
     fn inner(&self) -> Language {
@@ -70,6 +80,7 @@ impl std::fmt::Display for LanguageOption {
             Language::Italian => write!(f, "Italiano"),
             Language::PortugueseBR => write!(f, "Português (BR)"),
             Language::PortuguesePT => write!(f, "Português (PT)"),
+            Language::ChineseSimplified => write!(f, "简体中文"),
         }
     }
 }
@@ -106,6 +117,7 @@ impl Template {
             Template::HelloWorld => {
                 r#"-- Hello World in Lua
 print("Hello, World!")
+print("Hello世界, World你好!")
 "#
             }
             Template::Fibonacci => {
@@ -262,8 +274,10 @@ greet("World")
 
         (
             Self {
-                editor_left: CodeEditor::new(default_content, "lua"),
-                editor_right: CodeEditor::new(default_content, "lua"),
+                editor_left: CodeEditor::new(default_content, "lua")
+                    .font(iced::Font::with_name("JetBrains Mono")),
+                editor_right: CodeEditor::new(default_content, "lua")
+                    .font(iced::Font::with_name("JetBrains Mono")),
                 current_file_left: None,
                 current_file_right: None,
                 error_message: None,
