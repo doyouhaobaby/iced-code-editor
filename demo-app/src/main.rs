@@ -18,6 +18,9 @@ use iced::{Color, Element, Length, Subscription, Task, Theme, window};
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, Language, theme};
 use std::path::PathBuf;
+use std::fs::OpenOptions;
+use std::io::Write;
+
 mod fonts;
 
 /// Main entry point for the demo application.
@@ -187,6 +190,8 @@ struct DemoApp {
     panes: pane_grid::State<PaneType>,
     /// Log messages for output pane
     log_messages: Vec<String>,
+    /// Log file path for persistent logging
+    log_file: Option<PathBuf>,
     /// Search/replace enabled flag for left editor
     search_replace_enabled_left: bool,
     /// Search/replace enabled flag for right editor
@@ -285,6 +290,7 @@ greet("World")
                 current_language: Language::English,
                 panes,
                 log_messages,
+                log_file: Some(PathBuf::from("demo-app.log")),
                 search_replace_enabled_left: true,
                 search_replace_enabled_right: true,
                 line_numbers_enabled_left: true,
@@ -298,7 +304,17 @@ greet("World")
 
     /// Adds a log message.
     fn log(&mut self, level: &str, message: &str) {
-        self.log_messages.push(format!("[{}] {}", level, message));
+        let line = format!("[{}] {}", level, message);
+        self.log_messages.push(line.clone());
+        if let Some(path) = &self.log_file {
+            if let Ok(mut file) = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+            {
+                let _ = writeln!(file, "{}", line);
+            }
+        }
     }
 
     /// Handles messages and updates the application state.
