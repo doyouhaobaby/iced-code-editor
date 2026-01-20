@@ -42,10 +42,8 @@ struct FontOption {
 }
 
 impl FontOption {
-    const MONOSPACE: FontOption = FontOption {
-        name: "Monospace (Default)",
-        font: iced::Font::MONOSPACE,
-    };
+    const MONOSPACE: FontOption =
+        FontOption { name: "Monospace (Default)", font: iced::Font::MONOSPACE };
 
     const SERIF: FontOption = FontOption {
         name: "Serif",
@@ -63,11 +61,8 @@ impl FontOption {
         },
     };
 
-    const ALL: [FontOption; 3] = [
-        FontOption::MONOSPACE,
-        FontOption::SERIF,
-        FontOption::SANS_SERIF
-    ];
+    const ALL: [FontOption; 3] =
+        [FontOption::MONOSPACE, FontOption::SERIF, FontOption::SANS_SERIF];
 
     fn font(&self) -> iced::Font {
         self.font
@@ -463,9 +458,12 @@ greet("World")
                 Task::batch([task_left, task_right])
             }
             Message::FontChanged(font_option) => {
-                self.log("INFO", &format!("Font changed to: {}", font_option.name));
+                self.log(
+                    "INFO",
+                    &format!("Font changed to: {}", font_option.name),
+                );
                 self.current_font = font_option;
-                
+
                 let font = font_option.font();
                 self.editor_left.set_font(font);
                 self.editor_right.set_font(font);
@@ -658,9 +656,12 @@ greet("World")
                 .style(move |_| text::Style { color: Some(text_color) }),
             Space::new().width(Length::Fill),
             mouse_area(
-                text_input("Input for testing focus ...", &self.text_input_value)
-                    .on_input(Message::TextInputChanged)
-                    .width(200)
+                text_input(
+                    "Input for testing focus ...",
+                    &self.text_input_value
+                )
+                .on_input(Message::TextInputChanged)
+                .width(200)
             )
             .on_press(Message::TextInputClicked),
             Space::new().width(10),
