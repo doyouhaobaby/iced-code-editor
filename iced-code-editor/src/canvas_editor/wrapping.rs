@@ -6,7 +6,8 @@
 
 use crate::text_buffer::TextBuffer;
 
-use super::CHAR_WIDTH;
+use super::{CHAR_WIDTH, FONT_SIZE};
+use unicode_width::UnicodeWidthChar;
 
 /// Represents a visual line segment in the editor.
 ///
@@ -113,40 +114,67 @@ impl WrappingCalculator {
                 .collect();
         }
 
-        // Calculate wrap width in characters
-        let wrap_width =
-            self.calculate_wrap_width(viewport_width, gutter_width);
+        // Calculate wrap width in pixels
+        // 如果设置了 wrap_column，则宽度为 列数 * 字符宽度。
+        // 否则为 viewport 宽度减去 gutter 宽度。
+        let wrap_width_pixels = if let Some(cols) = self.wrap_column {
+            cols as f32 * CHAR_WIDTH
+        } else {
+            (viewport_width - gutter_width).max(CHAR_WIDTH)
+        };
 
         let mut visual_lines = Vec::new();
 
         for logical_line in 0..text_buffer.line_count() {
             let line_len = text_buffer.line_len(logical_line);
+            let line_content = text_buffer.line(logical_line);
 
-            if line_len <= wrap_width {
-                // Line fits in one segment
-                visual_lines.push(VisualLine::new(
-                    logical_line,
-                    0,
-                    0,
-                    line_len,
-                ));
-            } else {
-                // Split line into segments
-                let mut start_col = 0;
-                let mut segment_index = 0;
+            if line_content.is_empty() {
+                visual_lines.push(VisualLine::new(logical_line, 0, 0, 0));
+                continue;
+            }
 
-                while start_col < line_len {
-                    let end_col = (start_col + wrap_width).min(line_len);
+            let mut segment_index = 0;
+            let mut current_width = 0.0;
+            let mut current_segment_start_col = 0;
+
+            for (i, c) in line_content.chars().enumerate() {
+                // 计算当前字符的像素宽度
+                let char_width = match c.width() {
+                    Some(w) if w > 1 => FONT_SIZE, // 宽字符（如汉字）
+                    Some(_) => CHAR_WIDTH,         // 窄字符（如英文）
+                    None => 0.0,                   // 控制字符
+                };
+
+                // 如果加上当前字符超过了换行宽度，则在前一个字符处换行。
+                // 必须确保至少有一个字符（如果单个字符宽度就超过了 wrap_width）。
+                // 使用 epsilon 处理浮点数误差。
+                if current_width + char_width > wrap_width_pixels + 0.001
+                    && i > current_segment_start_col
+                {
+                    // 创建一个新的可视片段
                     visual_lines.push(VisualLine::new(
                         logical_line,
                         segment_index,
                         start_col,
-                        end_col,
+                        current_segment_start_col,
+                        i, // end_col is exclusive (当前字符属于下一行)
                     ));
                     start_col = end_col;
+
                     segment_index += 1;
+                    current_width = 0.0;
                 }
+                current_width += char_width;
             }
+            // Push remaining segment
+            // 添加该逻辑行的最后一个片段
+            visual_lines.push(VisualLine::new(
+                logical_line,
+                segment_index,
+                current_segment_start_col,
+                line_content.chars().count(),
+            ));
         }
 
         visual_lines
@@ -191,31 +219,6 @@ impl WrappingCalculator {
             })
     }
 
-    /// Calculates the wrap width in characters.
-    ///
-    /// # Arguments
-    ///
-    /// * `viewport_width` - Width of the viewport in pixels
-    /// * `gutter_width` - Width of the gutter in pixels
-    ///
-    /// # Returns
-    ///
-    /// Maximum number of characters per line
-    fn calculate_wrap_width(
-        &self,
-        viewport_width: f32,
-        gutter_width: f32,
-    ) -> usize {
-        match self.wrap_column {
-            Some(col) => col,
-            None => {
-                // Calculate based on viewport width
-                let available_width = viewport_width - gutter_width - 10.0; // Margins
-                let chars = (available_width / CHAR_WIDTH) as usize;
-                chars.max(20) // Minimum 20 characters
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -313,5 +316,29 @@ mod tests {
 
         assert!(vl1.is_first_segment());
         assert!(!vl2.is_first_segment());
+    }
+    #[test]
+    fn test_wrap_cjk() {
+        // CJK characters are wide (FONT_SIZE = 14.0)
+        // Latin characters are narrow (CHAR_WIDTH = 8.4)
+        // Wrap width = 10 columns * 8.4 = 84.0 pixels
+
+        // 6 CJK characters = 6 * 14.0 = 84.0 pixels. Matches exactly.
+        let text = "你好世界你好"; // 6 chars
+        let buffer = TextBuffer::new(text);
+        let calc = WrappingCalculator::new(true, Some(10)); // 84.0 px
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
+
+        assert_eq!(visual_lines.len(), 1);
+        assert_eq!(visual_lines[0].len(), 6);
+
+        // 7 CJK characters = 7 * 14.0 = 98.0 pixels. Should wrap.
+        let text = "你好世界你好世"; // 7 chars
+        let buffer = TextBuffer::new(text);
+        let visual_lines = calc.calculate_visual_lines(&buffer, 800.0, 60.0);
+
+        assert_eq!(visual_lines.len(), 2);
+        assert_eq!(visual_lines[0].len(), 6); // First 6 fit
+        assert_eq!(visual_lines[1].len(), 1); // 7th wraps
     }
 }

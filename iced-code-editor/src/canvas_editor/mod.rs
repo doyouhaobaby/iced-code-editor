@@ -7,6 +7,7 @@ use iced::widget::operation::{RelativeOffset, snap_to};
 use iced::widget::{Id, canvas};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
+use unicode_width::UnicodeWidthChar;
 
 use crate::i18n::Translations;
 use crate::text_buffer::TextBuffer;
@@ -39,6 +40,24 @@ pub(crate) const CHAR_WIDTH: f32 = 8.4; // Monospace character width
 pub(crate) const GUTTER_WIDTH: f32 = 45.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(530);
+
+/// 测量文本的显示宽度，考虑 CJK（中日韩）宽字符。
+///
+/// - 宽字符（如中文）宽度为 FONT_SIZE。
+/// - 窄字符（如英文）宽度为 CHAR_WIDTH。
+/// - 控制字符宽度为 0。
+pub(crate) fn measure_text_width(text: &str) -> f32 {
+    text.chars()
+        .map(|c| {
+            // Check character width: 0 for control, 1 for half-width, 2 for full-width
+            match c.width() {
+                Some(w) if w > 1 => FONT_SIZE,
+                Some(_) => CHAR_WIDTH,
+                None => 0.0,
+            }
+        })
+        .sum()
+}
 
 /// Canvas-based high-performance text editor.
 pub struct CodeEditor {

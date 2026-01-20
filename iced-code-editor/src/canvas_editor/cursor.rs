@@ -3,9 +3,12 @@
 use iced::widget::operation::scroll_to;
 use iced::widget::scrollable;
 use iced::{Point, Task};
+use unicode_width::UnicodeWidthChar;
 
 use super::wrapping::WrappingCalculator;
-use super::{ArrowDirection, CHAR_WIDTH, CodeEditor, LINE_HEIGHT, Message};
+use super::{
+    ArrowDirection, CHAR_WIDTH, CodeEditor, FONT_SIZE, LINE_HEIGHT, Message,
+};
 
 impl CodeEditor {
     /// Moves the cursor based on arrow key direction.
@@ -109,11 +112,16 @@ impl CodeEditor {
         self.cache.clear();
     }
 
-    /// Handles mouse click to position cursor.
-    pub(crate) fn handle_mouse_click(&mut self, point: Point) {
+    /// 根据屏幕坐标点计算光标的逻辑位置 (行, 列)。
+    ///
+    /// 这个方法会考虑：
+    /// 1. 是否点击在行号区域（Gutter）。
+    /// 2. 自动换行后的可视行（Visual Line）映射。
+    /// 3. CJK（中日韩）字符的宽度（宽字符占 FONT_SIZE，窄字符占 CHAR_WIDTH）。
+    fn calculate_cursor_from_point(&self, point: Point) -> Option<(usize, usize)> {
         // Account for gutter width
         if point.x < self.gutter_width() {
-            return; // Clicked in gutter
+            return None; // Clicked in gutter
         }
 
         // Calculate visual line number - point.y is already in canvas coordinates
@@ -132,20 +140,51 @@ impl CodeEditor {
             // Clicked beyond last line - move to end of document
             let last_line = self.buffer.line_count().saturating_sub(1);
             let last_col = self.buffer.line_len(last_line);
-            self.cursor = (last_line, last_col);
-            self.cache.clear();
-            return;
+            return Some((last_line, last_col));
         }
 
         let visual_line = &visual_lines[visual_line_idx];
 
         // Calculate column within the segment
         let x_in_text = point.x - self.gutter_width() - 5.0;
-        let col_offset = (x_in_text / CHAR_WIDTH).max(0.0) as usize;
-        let col = (visual_line.start_col + col_offset).min(visual_line.end_col);
 
-        self.cursor = (visual_line.logical_line, col);
-        self.cache.clear();
+        // Use correct width calculation for CJK support
+        let line_content = self.buffer.line(visual_line.logical_line);
+        let segment_text: String = line_content
+            .chars()
+            .skip(visual_line.start_col)
+            .take(visual_line.end_col - visual_line.start_col)
+            .collect();
+
+        let mut current_width = 0.0;
+        let mut col_offset = 0;
+
+        for c in segment_text.chars() {
+            let char_width = match c.width() {
+                Some(w) if w > 1 => FONT_SIZE,
+                Some(_) => CHAR_WIDTH,
+                None => 0.0,
+            };
+
+            if current_width + char_width / 2.0 > x_in_text {
+                break;
+            }
+            current_width += char_width;
+            col_offset += 1;
+        }
+
+        let col = visual_line.start_col + col_offset;
+        Some((visual_line.logical_line, col))
+    }
+
+    /// 处理鼠标点击事件以定位光标。
+    ///
+    /// 复用 `calculate_cursor_from_point` 来计算位置，并更新光标缓存。
+    pub(crate) fn handle_mouse_click(&mut self, point: Point) {
+        if let Some(cursor) = self.calculate_cursor_from_point(point) {
+            self.cursor = cursor;
+            self.cache.clear();
+        }
     }
 
     /// Returns a scroll command to make the cursor visible.
@@ -223,40 +262,13 @@ impl CodeEditor {
     }
 
     /// Handles mouse drag for text selection.
+    ///
+    /// 复用 `calculate_cursor_from_point` 来计算位置，并更新选区终点。
     pub(crate) fn handle_mouse_drag(&mut self, point: Point) {
-        // Account for gutter width
-        if point.x < self.gutter_width() {
-            return;
-        }
-
-        // Calculate visual line - point.y is already in canvas coordinates
-        let visual_line_idx = (point.y / LINE_HEIGHT) as usize;
-
-        let wrapping_calc =
-            WrappingCalculator::new(self.wrap_enabled, self.wrap_column);
-        let visual_lines = wrapping_calc.calculate_visual_lines(
-            &self.buffer,
-            800.0,
-            self.gutter_width(),
-        );
-
-        if visual_line_idx >= visual_lines.len() {
-            let last_line = self.buffer.line_count().saturating_sub(1);
-            let last_col = self.buffer.line_len(last_line);
-            self.cursor = (last_line, last_col);
+        if let Some(cursor) = self.calculate_cursor_from_point(point) {
+            self.cursor = cursor;
             self.selection_end = Some(self.cursor);
-            return;
         }
-
-        let visual_line = &visual_lines[visual_line_idx];
-
-        let x_in_text = point.x - self.gutter_width() - 5.0;
-        let col_offset = (x_in_text / CHAR_WIDTH).max(0.0) as usize;
-        let col = (visual_line.start_col + col_offset).min(visual_line.end_col);
-
-        // Update cursor and selection end
-        self.cursor = (visual_line.logical_line, col);
-        self.selection_end = Some(self.cursor);
     }
 }
 
@@ -329,5 +341,36 @@ mod tests {
         editor.cursor = (0, 0);
         editor.page_up();
         assert_eq!(editor.cursor.0, 0);
+    }
+
+    #[test]
+    fn test_cursor_click_cjk() {
+        use iced::Point;
+        let mut editor = CodeEditor::new("你好", "txt");
+        editor.set_line_numbers_enabled(false);
+
+        // "你" is 0..14px. "好" is 14..28px. FONT_SIZE=14.0
+
+        // Case 1: Click at 5px (inside "你", < half width)
+        // Expect col 0
+        editor.handle_mouse_click(Point::new(5.0 + 5.0, 10.0)); // +5.0 padding
+        assert_eq!(editor.cursor, (0, 0));
+
+        // Case 2: Click at 10px (inside "你", > half width)
+        // Expect col 1
+        editor.handle_mouse_click(Point::new(10.0 + 5.0, 10.0));
+        assert_eq!(editor.cursor, (0, 1));
+
+        // Case 3: Click at 18px (inside "好", < half width of "好")
+        // "好" starts at 14. 18 is 4px into "好". 4 < 7.
+        // Expect col 1 (start of "好")
+        editor.handle_mouse_click(Point::new(18.0 + 5.0, 10.0));
+        assert_eq!(editor.cursor, (0, 1));
+
+        // Case 4: Click at 25px (inside "好", > half width of "好")
+        // "好" starts at 14. 25 is 11px into "好". 11 > 7.
+        // Expect col 2 (end of "好")
+        editor.handle_mouse_click(Point::new(25.0 + 5.0, 10.0));
+        assert_eq!(editor.cursor, (0, 2));
     }
 }

@@ -15,9 +15,50 @@ fn is_cursor_in_bounds(cursor: &mouse::Cursor, bounds: Rectangle) -> bool {
     }
 }
 
+/// 计算文本片段用于渲染或高亮的几何信息（X坐标和宽度）。
+///
+/// 返回值: (x_start, width)
+///
+/// 参数:
+/// - `line_content`: 当前行的完整文本内容。
+/// - `visual_start_col`: 当前可视行的起始列索引。
+/// - `segment_start_col`: 目标片段（如高亮区域）的起始列索引。
+/// - `segment_end_col`: 目标片段的结束列索引。
+/// - `base_offset`: 基础 X 偏移量（通常是 gutter_width + padding）。
+///
+/// 该函数会正确处理 CJK 字符宽度，确保高亮位置准确。
+fn calculate_segment_geometry(
+    line_content: &str,
+    visual_start_col: usize,
+    segment_start_col: usize,
+    segment_end_col: usize,
+    base_offset: f32,
+) -> (f32, f32) {
+    // Calculate prefix width relative to visual line start
+    let prefix_len = segment_start_col.saturating_sub(visual_start_col);
+    let prefix_text: String = line_content
+        .chars()
+        .skip(visual_start_col)
+        .take(prefix_len)
+        .collect();
+    let prefix_width = measure_text_width(&prefix_text);
+
+    // Calculate segment width
+    let segment_len = segment_end_col.saturating_sub(segment_start_col);
+    let segment_text: String = line_content
+        .chars()
+        .skip(segment_start_col)
+        .take(segment_len)
+        .collect();
+    let segment_width = measure_text_width(&segment_text);
+
+    (base_offset + prefix_width, segment_width)
+}
+
 use super::wrapping::WrappingCalculator;
 use super::{
-    ArrowDirection, CHAR_WIDTH, CodeEditor, FONT_SIZE, LINE_HEIGHT, Message,
+    ArrowDirection, CodeEditor, FONT_SIZE, LINE_HEIGHT, Message,
+    measure_text_width,
 };
 use iced::widget::canvas::Action;
 
@@ -94,8 +135,7 @@ impl canvas::Program<Message> for CodeEditor {
                         let line_num = visual_line.logical_line + 1;
                         let line_num_text = format!("{}", line_num);
                         // Calculate actual text width and center in gutter
-                        let digit_count = line_num_text.len() as f32;
-                        let text_width = digit_count * CHAR_WIDTH;
+                        let text_width = measure_text_width(&line_num_text);
                         let x_pos = (self.gutter_width() - text_width) / 2.0;
                         frame.fill_text(canvas::Text {
                             content: line_num_text,
@@ -208,8 +248,7 @@ impl canvas::Program<Message> for CodeEditor {
                                 ..canvas::Text::default()
                             });
 
-                            x_offset += segment_text.chars().count() as f32
-                                * CHAR_WIDTH;
+                            x_offset += measure_text_width(segment_text);
                         }
 
                         char_pos = text_end;
@@ -268,13 +307,19 @@ impl canvas::Program<Message> for CodeEditor {
                         if start_v == end_v {
                             // Match within same visual line
                             let y = start_v as f32 * LINE_HEIGHT;
-                            let x_start = self.gutter_width()
-                                + 5.0
-                                + search_match.col as f32 * CHAR_WIDTH;
-                            let x_end = self.gutter_width()
-                                + 5.0
-                                + (search_match.col + query_len) as f32
-                                    * CHAR_WIDTH;
+                            let vl = &visual_lines[start_v];
+                            let line_content =
+                                self.buffer.line(vl.logical_line);
+
+                            // 使用 calculate_segment_geometry 计算搜索匹配项的位置和宽度
+                            let (x_start, match_width) = calculate_segment_geometry(
+                                line_content,
+                                vl.start_col,
+                                search_match.col,
+                                search_match.col + query_len,
+                                self.gutter_width() + 5.0,
+                            );
+                            let x_end = x_start + match_width;
 
                             frame.fill_rectangle(
                                 Point::new(x_start, y + 2.0),
@@ -306,14 +351,17 @@ impl canvas::Program<Message> for CodeEditor {
                                     vl.end_col
                                 };
 
-                                let x_start = self.gutter_width()
-                                    + 5.0
-                                    + (sel_start_col - vl.start_col) as f32
-                                        * CHAR_WIDTH;
-                                let x_end = self.gutter_width()
-                                    + 5.0
-                                    + (sel_end_col - vl.start_col) as f32
-                                        * CHAR_WIDTH;
+                                let line_content =
+                                    self.buffer.line(vl.logical_line);
+
+                                let (x_start, sel_width) = calculate_segment_geometry(
+                                    line_content,
+                                    vl.start_col,
+                                    sel_start_col,
+                                    sel_end_col,
+                                    self.gutter_width() + 5.0,
+                                );
+                                let x_end = x_start + sel_width;
 
                                 frame.fill_rectangle(
                                     Point::new(x_start, y + 2.0),
@@ -354,12 +402,18 @@ impl canvas::Program<Message> for CodeEditor {
                         if start_v == end_v {
                             // Selection within same visual line
                             let y = start_v as f32 * LINE_HEIGHT;
-                            let x_start = self.gutter_width()
-                                + 5.0
-                                + start.1 as f32 * CHAR_WIDTH;
-                            let x_end = self.gutter_width()
-                                + 5.0
-                                + end.1 as f32 * CHAR_WIDTH;
+                            let vl = &visual_lines[start_v];
+                            let line_content =
+                                self.buffer.line(vl.logical_line);
+
+                            let (x_start, sel_width) = calculate_segment_geometry(
+                                line_content,
+                                vl.start_col,
+                                start.1,
+                                end.1,
+                                self.gutter_width() + 5.0,
+                            );
+                            let x_end = x_start + sel_width;
 
                             frame.fill_rectangle(
                                 Point::new(x_start, y + 2.0),
@@ -387,14 +441,17 @@ impl canvas::Program<Message> for CodeEditor {
                                     vl.end_col
                                 };
 
-                                let x_start = self.gutter_width()
-                                    + 5.0
-                                    + (sel_start_col - vl.start_col) as f32
-                                        * CHAR_WIDTH;
-                                let x_end = self.gutter_width()
-                                    + 5.0
-                                    + (sel_end_col - vl.start_col) as f32
-                                        * CHAR_WIDTH;
+                                let line_content =
+                                    self.buffer.line(vl.logical_line);
+
+                                let (x_start, sel_width) = calculate_segment_geometry(
+                                    line_content,
+                                    vl.start_col,
+                                    sel_start_col,
+                                    sel_end_col,
+                                    self.gutter_width() + 5.0,
+                                );
+                                let x_end = x_start + sel_width;
 
                                 frame.fill_rectangle(
                                     Point::new(x_start, y + 2.0),
@@ -446,14 +503,17 @@ impl canvas::Program<Message> for CodeEditor {
                                     vl.end_col
                                 };
 
-                            let x_start = self.gutter_width()
-                                + 5.0
-                                + (sel_start_col - vl.start_col) as f32
-                                    * CHAR_WIDTH;
-                            let x_end = self.gutter_width()
-                                + 5.0
-                                + (sel_end_col - vl.start_col) as f32
-                                    * CHAR_WIDTH;
+                            let line_content =
+                                self.buffer.line(vl.logical_line);
+
+                            let (x_start, sel_width) = calculate_segment_geometry(
+                                line_content,
+                                vl.start_col,
+                                sel_start_col,
+                                sel_end_col,
+                                self.gutter_width() + 5.0,
+                            );
+                            let x_end = x_start + sel_width;
 
                             frame.fill_rectangle(
                                 Point::new(x_start, y + 2.0),
@@ -476,9 +536,16 @@ impl canvas::Program<Message> for CodeEditor {
                     )
                 {
                     let vl = &visual_lines[cursor_visual];
-                    let cursor_x = self.gutter_width()
-                        + 5.0
-                        + (self.cursor.1 - vl.start_col) as f32 * CHAR_WIDTH;
+                    let line_content = self.buffer.line(vl.logical_line);
+
+                    // 计算光标位置
+                    let (cursor_x, _) = calculate_segment_geometry(
+                        line_content,
+                        vl.start_col,
+                        self.cursor.1,
+                        self.cursor.1,
+                        self.gutter_width() + 5.0,
+                    );
                     let cursor_y = cursor_visual as f32 * LINE_HEIGHT;
 
                     frame.fill_rectangle(
