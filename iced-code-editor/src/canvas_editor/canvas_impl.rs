@@ -1,5 +1,6 @@
 //! Canvas rendering implementation using Iced's `canvas::Program`.
 
+use iced::advanced::input_method;
 use iced::mouse;
 use iced::widget::canvas::{self, Geometry};
 use iced::{Color, Event, Point, Rectangle, Size, Theme, keyboard};
@@ -36,11 +37,8 @@ fn calculate_segment_geometry(
 ) -> (f32, f32) {
     // Calculate prefix width relative to visual line start
     let prefix_len = segment_start_col.saturating_sub(visual_start_col);
-    let prefix_text: String = line_content
-        .chars()
-        .skip(visual_start_col)
-        .take(prefix_len)
-        .collect();
+    let prefix_text: String =
+        line_content.chars().skip(visual_start_col).take(prefix_len).collect();
     let prefix_width = measure_text_width(&prefix_text);
 
     // Calculate segment width
@@ -312,13 +310,14 @@ impl canvas::Program<Message> for CodeEditor {
                                 self.buffer.line(vl.logical_line);
 
                             // 使用 calculate_segment_geometry 计算搜索匹配项的位置和宽度
-                            let (x_start, match_width) = calculate_segment_geometry(
-                                line_content,
-                                vl.start_col,
-                                search_match.col,
-                                search_match.col + query_len,
-                                self.gutter_width() + 5.0,
-                            );
+                            let (x_start, match_width) =
+                                calculate_segment_geometry(
+                                    line_content,
+                                    vl.start_col,
+                                    search_match.col,
+                                    search_match.col + query_len,
+                                    self.gutter_width() + 5.0,
+                                );
                             let x_end = x_start + match_width;
 
                             frame.fill_rectangle(
@@ -354,13 +353,14 @@ impl canvas::Program<Message> for CodeEditor {
                                 let line_content =
                                     self.buffer.line(vl.logical_line);
 
-                                let (x_start, sel_width) = calculate_segment_geometry(
-                                    line_content,
-                                    vl.start_col,
-                                    sel_start_col,
-                                    sel_end_col,
-                                    self.gutter_width() + 5.0,
-                                );
+                                let (x_start, sel_width) =
+                                    calculate_segment_geometry(
+                                        line_content,
+                                        vl.start_col,
+                                        sel_start_col,
+                                        sel_end_col,
+                                        self.gutter_width() + 5.0,
+                                    );
                                 let x_end = x_start + sel_width;
 
                                 frame.fill_rectangle(
@@ -406,13 +406,14 @@ impl canvas::Program<Message> for CodeEditor {
                             let line_content =
                                 self.buffer.line(vl.logical_line);
 
-                            let (x_start, sel_width) = calculate_segment_geometry(
-                                line_content,
-                                vl.start_col,
-                                start.1,
-                                end.1,
-                                self.gutter_width() + 5.0,
-                            );
+                            let (x_start, sel_width) =
+                                calculate_segment_geometry(
+                                    line_content,
+                                    vl.start_col,
+                                    start.1,
+                                    end.1,
+                                    self.gutter_width() + 5.0,
+                                );
                             let x_end = x_start + sel_width;
 
                             frame.fill_rectangle(
@@ -444,13 +445,14 @@ impl canvas::Program<Message> for CodeEditor {
                                 let line_content =
                                     self.buffer.line(vl.logical_line);
 
-                                let (x_start, sel_width) = calculate_segment_geometry(
-                                    line_content,
-                                    vl.start_col,
-                                    sel_start_col,
-                                    sel_end_col,
-                                    self.gutter_width() + 5.0,
-                                );
+                                let (x_start, sel_width) =
+                                    calculate_segment_geometry(
+                                        line_content,
+                                        vl.start_col,
+                                        sel_start_col,
+                                        sel_end_col,
+                                        self.gutter_width() + 5.0,
+                                    );
                                 let x_end = x_start + sel_width;
 
                                 frame.fill_rectangle(
@@ -506,13 +508,14 @@ impl canvas::Program<Message> for CodeEditor {
                             let line_content =
                                 self.buffer.line(vl.logical_line);
 
-                            let (x_start, sel_width) = calculate_segment_geometry(
-                                line_content,
-                                vl.start_col,
-                                sel_start_col,
-                                sel_end_col,
-                                self.gutter_width() + 5.0,
-                            );
+                            let (x_start, sel_width) =
+                                calculate_segment_geometry(
+                                    line_content,
+                                    vl.start_col,
+                                    sel_start_col,
+                                    sel_end_col,
+                                    self.gutter_width() + 5.0,
+                                );
                             let x_end = x_start + sel_width;
 
                             frame.fill_rectangle(
@@ -525,9 +528,30 @@ impl canvas::Program<Message> for CodeEditor {
                 }
             }
 
-            // Draw cursor (only when editor has focus)
-            if self.show_cursor && self.cursor_visible && self.is_focused() {
-                // Find the visual line containing the cursor
+            // 绘制光标逻辑（仅当编辑器具备焦点时执行）
+            // -------------------------------------------------------------------------
+            // 核心逻辑说明：
+            // 1. 系统根据是否存在 IME 预编辑（ime_preedit）决定走哪条绘制路径。
+            // 2. 必须同时满足 `is_focused()`（Iced 焦点）和 `has_canvas_focus()`（内部逻辑焦点），
+            //    才能确保光标只在当前活跃的编辑器中绘制，避免多光标问题。
+            // 3. 使用 `WrappingCalculator` 将逻辑坐标（行、列）转换为可视坐标（x, y），
+            //    以支持自动换行情况下的正确光标定位。
+            // -------------------------------------------------------------------------
+            if self.show_cursor
+                && self.cursor_visible
+                && self.is_focused()
+                && self.has_canvas_focus
+                && self.ime_preedit.is_some()
+            {
+                // [分支 A] IME 预编辑绘制模式
+                // ---------------------------------------------------------------------
+                // 当用户正在使用输入法输入（如拼音未回车上屏）时，会进入此分支。
+                // 此时不绘制普通光标，而是绘制“预编辑区”，包含：
+                // - 预编辑文本背景（高亮显示正在输入的字符）
+                // - 预编辑文本内容（preedit.content）
+                // - 预编辑选区（如下划线或选中背景）
+                // - 预编辑插入点（caret）
+                // ---------------------------------------------------------------------
                 if let Some(cursor_visual) =
                     WrappingCalculator::logical_to_visual(
                         &visual_lines,
@@ -538,7 +562,8 @@ impl canvas::Program<Message> for CodeEditor {
                     let vl = &visual_lines[cursor_visual];
                     let line_content = self.buffer.line(vl.logical_line);
 
-                    // 计算光标位置
+                    // 计算预编辑区的起始 X 坐标
+                    // 使用 calculate_segment_geometry 确保字符宽度计算准确（处理 CJK 字符）
                     let (cursor_x, _) = calculate_segment_geometry(
                         line_content,
                         vl.start_col,
@@ -548,6 +573,116 @@ impl canvas::Program<Message> for CodeEditor {
                     );
                     let cursor_y = cursor_visual as f32 * LINE_HEIGHT;
 
+                    if let Some(preedit) = self.ime_preedit.as_ref() {
+                        let preedit_width =
+                            measure_text_width(&preedit.content);
+
+                        // 1. 绘制预编辑文本的背景（淡白色半透明）
+                        // 这让用户知道这部分文本尚未提交，处于编辑状态
+                        frame.fill_rectangle(
+                            Point::new(cursor_x, cursor_y + 2.0),
+                            Size::new(preedit_width, LINE_HEIGHT - 4.0),
+                            Color { r: 1.0, g: 1.0, b: 1.0, a: 0.08 },
+                        );
+
+                        // 2. 绘制预编辑中的选区（如果有）
+                        // 输入法可能会在预编辑文本中标记一段“选区”（如拼音分词选择）
+                        // 这里的 range 是 UTF-8 字节索引，需注意 slice 安全
+                        if let Some(range) = preedit.selection.as_ref()
+                            && range.start != range.end
+                        {
+                            let start = range.start.min(preedit.content.len());
+                            let end = range.end.min(preedit.content.len());
+
+                            let selected_prefix = &preedit.content[..start];
+                            let selected_text = &preedit.content[start..end];
+
+                            let selection_x =
+                                cursor_x + measure_text_width(selected_prefix);
+                            let selection_w = measure_text_width(selected_text);
+
+                            frame.fill_rectangle(
+                                Point::new(selection_x, cursor_y + 2.0),
+                                Size::new(selection_w, LINE_HEIGHT - 4.0),
+                                Color { r: 0.3, g: 0.5, b: 0.8, a: 0.3 },
+                            );
+                        }
+
+                        // 3. 绘制预编辑文本本身
+                        frame.fill_text(canvas::Text {
+                            content: preedit.content.clone(),
+                            position: Point::new(cursor_x, cursor_y + 2.0),
+                            color: self.style.text_color,
+                            size: FONT_SIZE.into(),
+                            font: self.font,
+                            ..canvas::Text::default()
+                        });
+
+                        // 4. 绘制底部下划线（指示输入法状态）
+                        frame.fill_rectangle(
+                            Point::new(cursor_x, cursor_y + LINE_HEIGHT - 3.0),
+                            Size::new(preedit_width, 1.0),
+                            self.style.text_color,
+                        );
+
+                        // 5. 绘制预编辑内部的光标（Caret）
+                        // 如果输入法提供了光标位置（通常是 selection 的 end），则绘制细竖线
+                        if let Some(range) = preedit.selection.as_ref() {
+                            let caret_end =
+                                range.end.min(preedit.content.len());
+                            if caret_end <= preedit.content.len() {
+                                let caret_prefix =
+                                    &preedit.content[..caret_end];
+                                let caret_x =
+                                    cursor_x + measure_text_width(caret_prefix);
+
+                                frame.fill_rectangle(
+                                    Point::new(caret_x, cursor_y + 2.0),
+                                    Size::new(2.0, LINE_HEIGHT - 4.0),
+                                    self.style.text_color,
+                                );
+                            }
+                        }
+                    }
+                }
+            } else if self.show_cursor
+                && self.cursor_visible
+                && self.is_focused()
+                && self.has_canvas_focus
+            {
+                // [分支 B] 普通光标绘制模式
+                // ---------------------------------------------------------------------
+                // 当没有 IME 预编辑时，绘制标准的编辑器光标。
+                // 关键检查：
+                // - is_focused(): 整个 Widget 是否获得 Iced 焦点
+                // - has_canvas_focus: 内部状态是否标记为获得焦点（处理鼠标点击等）
+                // - 只有两者同时满足，才绘制光标，确保不会出现“幽灵光标”
+                // ---------------------------------------------------------------------
+                
+                // 将逻辑光标位置 (Line, Col) 转换为可视位置 (Visual Line Index)
+                // 处理自动换行带来的行号变化
+                if let Some(cursor_visual) =
+                    WrappingCalculator::logical_to_visual(
+                        &visual_lines,
+                        self.cursor.0,
+                        self.cursor.1,
+                    )
+                {
+                    let vl = &visual_lines[cursor_visual];
+                    let line_content = self.buffer.line(vl.logical_line);
+
+                    // 计算光标的精确 X 坐标
+                    // 考虑了行号 gutter 宽度、左侧 padding 以及前缀字符的实际渲染宽度
+                    let (cursor_x, _) = calculate_segment_geometry(
+                        line_content,
+                        vl.start_col,
+                        self.cursor.1,
+                        self.cursor.1,
+                        self.gutter_width() + 5.0,
+                    );
+                    let cursor_y = cursor_visual as f32 * LINE_HEIGHT;
+
+                    // 绘制标准光标（2px 宽的竖线）
                     frame.fill_rectangle(
                         Point::new(cursor_x, cursor_y + 2.0),
                         Size::new(2.0, LINE_HEIGHT - 4.0),
@@ -588,6 +723,12 @@ impl canvas::Program<Message> for CodeEditor {
 
                 // Only process keyboard events if canvas has focus
                 if !self.has_canvas_focus {
+                    return None;
+                }
+
+                if self.ime_preedit.is_some()
+                    && !(modifiers.control() || modifiers.command())
+                {
                     return None;
                 }
 
@@ -851,6 +992,51 @@ impl canvas::Program<Message> for CodeEditor {
                 } else {
                     None
                 }
+            }
+            Event::InputMethod(event) => {
+                let focused_id = super::FOCUSED_EDITOR_ID
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if focused_id != self.editor_id {
+                    return None;
+                }
+
+                if !is_cursor_in_bounds(&cursor, bounds) {
+                    return None;
+                }
+
+                if !self.has_canvas_focus {
+                    return None;
+                }
+
+                // 输入法事件处理逻辑
+                // ---------------------------------------------------------------------
+                // 核心映射：将 Iced 系统的输入法事件转换为编辑器内部的 Message
+                //
+                // 事件流说明：
+                // 1. Opened: 输入法激活（如切换到中文输入法）。此时我们清空旧的预编辑状态。
+                // 2. Preedit: 用户正在输入（如输入拼音 "nihao" 但未选词）。
+                //    - content: 当前的候选文本
+                //    - selection: 文本中的选区（如分词高亮），注意是字节范围
+                // 3. Commit: 用户完成选词，文本上屏。此时将文本正式插入编辑器缓冲区。
+                // 4. Closed: 输入法关闭或失去焦点。
+                //
+                // 安全性检查：
+                // - 仅当 `focused_id` 匹配当前编辑器 ID 时处理
+                // - 仅当 `has_canvas_focus` 为真时处理
+                // 这确保了如果界面上有多个编辑器或搜索框，输入法事件不会被错误的组件接收。
+                // ---------------------------------------------------------------------
+                let message = match event {
+                    input_method::Event::Opened => Message::ImeOpened,
+                    input_method::Event::Preedit(content, selection) => {
+                        Message::ImePreedit(content.clone(), selection.clone())
+                    }
+                    input_method::Event::Commit(content) => {
+                        Message::ImeCommit(content.clone())
+                    }
+                    input_method::Event::Closed => Message::ImeClosed,
+                };
+
+                Some(Action::publish(message).and_capture())
             }
             _ => None,
         }

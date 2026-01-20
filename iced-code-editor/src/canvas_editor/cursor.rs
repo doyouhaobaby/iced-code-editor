@@ -118,7 +118,10 @@ impl CodeEditor {
     /// 1. 是否点击在行号区域（Gutter）。
     /// 2. 自动换行后的可视行（Visual Line）映射。
     /// 3. CJK（中日韩）字符的宽度（宽字符占 FONT_SIZE，窄字符占 CHAR_WIDTH）。
-    fn calculate_cursor_from_point(&self, point: Point) -> Option<(usize, usize)> {
+    fn calculate_cursor_from_point(
+        &self,
+        point: Point,
+    ) -> Option<(usize, usize)> {
         // Account for gutter width
         if point.x < self.gutter_width() {
             return None; // Clicked in gutter

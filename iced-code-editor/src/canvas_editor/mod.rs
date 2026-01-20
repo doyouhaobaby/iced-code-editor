@@ -5,6 +5,7 @@
 
 use iced::widget::operation::{RelativeOffset, snap_to};
 use iced::widget::{Id, canvas};
+use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use unicode_width::UnicodeWidthChar;
@@ -57,6 +58,12 @@ pub(crate) fn measure_text_width(text: &str) -> f32 {
             }
         })
         .sum()
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ImePreedit {
+    pub(crate) content: String,
+    pub(crate) selection: Option<Range<usize>>,
 }
 
 /// Canvas-based high-performance text editor.
@@ -115,6 +122,7 @@ pub struct CodeEditor {
     pub(crate) show_cursor: bool,
     /// The font used for rendering text
     pub(crate) font: iced::Font,
+    pub(crate) ime_preedit: Option<ImePreedit>,
 }
 
 /// Messages emitted by the code editor
@@ -192,6 +200,10 @@ pub enum Message {
     CanvasFocusGained,
     /// Canvas lost focus (external widget interaction)
     CanvasFocusLost,
+    ImeOpened,
+    ImePreedit(String, Option<Range<usize>>),
+    ImeCommit(String),
+    ImeClosed,
 }
 
 /// Arrow key directions
@@ -251,6 +263,7 @@ impl CodeEditor {
             has_canvas_focus: false,
             show_cursor: false,
             font: iced::Font::MONOSPACE,
+            ime_preedit: None,
         }
     }
 
@@ -692,5 +705,6 @@ impl CodeEditor {
     pub fn lose_focus(&mut self) {
         self.has_canvas_focus = false;
         self.show_cursor = false;
+        self.ime_preedit = None;
     }
 }

@@ -17,9 +17,9 @@ use iced::widget::{
 use iced::{Color, Element, Length, Subscription, Task, Theme, window};
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, Language, theme};
-use std::path::PathBuf;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 
 mod fonts;
 
@@ -306,14 +306,11 @@ greet("World")
     fn log(&mut self, level: &str, message: &str) {
         let line = format!("[{}] {}", level, message);
         self.log_messages.push(line.clone());
-        if let Some(path) = &self.log_file {
-            if let Ok(mut file) = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                let _ = writeln!(file, "{}", line);
-            }
+        if let Some(path) = &self.log_file
+            && let Ok(mut file) =
+                OpenOptions::new().create(true).append(true).open(path)
+        {
+            let _ = writeln!(file, "{}", line);
         }
     }
 

@@ -7,7 +7,7 @@ use super::command::{
     Command, CompositeCommand, DeleteCharCommand, DeleteForwardCommand,
     InsertCharCommand, InsertNewlineCommand, ReplaceTextCommand,
 };
-use super::{CURSOR_BLINK_INTERVAL, CodeEditor, Message};
+use super::{CURSOR_BLINK_INTERVAL, CodeEditor, ImePreedit, Message};
 
 impl CodeEditor {
     /// Updates the editor state based on messages and returns scroll commands.
@@ -556,6 +556,81 @@ impl CodeEditor {
             Message::CanvasFocusLost => {
                 self.has_canvas_focus = false;
                 self.show_cursor = false;
+                self.ime_preedit = None;
+                self.cache.clear();
+                Task::none()
+            }
+            Message::ImeOpened => {
+                // 输入法开启事件 (Opened)
+                // -------------------------------------------------------------
+                // 当用户激活输入法（如切换到中文）时触发。
+                // 动作：清空当前的预编辑内容 (ime_preedit)，准备接收新的输入。
+                // 这确保了不会残留上一次的输入状态。
+                // -------------------------------------------------------------
+                self.ime_preedit = None;
+                self.cache.clear();
+                Task::none()
+            }
+            Message::ImePreedit(content, selection) => {
+                // 输入法预编辑事件 (Preedit)
+                // -------------------------------------------------------------
+                // 当用户正在打字但未选定词语时触发（例如输入拼音 "nihao"）。
+                // 参数：
+                // - content: 当前显示的预编辑文本（如 "ni h"）。
+                // - selection: 预编辑文本内的光标或选区位置。
+                //
+                // 注意：Iced 传递的 selection 是基于“字节索引 (byte index)”的范围，
+                // 而非字符索引。在渲染或处理时，必须按照 UTF-8 字节偏移量来截取字符串，
+                // 否则会导致多字节字符（如中文）处理崩溃。
+                // -------------------------------------------------------------
+                if content.is_empty() {
+                    self.ime_preedit = None;
+                } else {
+                    self.ime_preedit = Some(ImePreedit {
+                        content: content.clone(),
+                        selection: selection.clone(),
+                    });
+                }
+
+                self.cache.clear();
+                Task::none()
+            }
+            Message::ImeCommit(text) => {
+                // 输入法提交事件 (Commit)
+                // -------------------------------------------------------------
+                // 当用户完成选词并上屏时触发。
+                // 动作：
+                // 1. 清空预编辑状态 (ime_preedit = None)。
+                // 2. 如果文本不为空，将其插入到编辑器当前光标位置。
+                // 3. 开启 "Typing" 撤销分组 (undo group)：
+                //    这样连续的输入法提交可以被视为一次操作，方便用户按 Ctrl+Z 一次性撤销，
+                //    而不是逐字撤销，提升体验。
+                // -------------------------------------------------------------
+                self.ime_preedit = None;
+
+                if text.is_empty() {
+                    self.cache.clear();
+                    return Task::none();
+                }
+
+                if !self.is_grouping {
+                    self.history.begin_group("Typing");
+                    self.is_grouping = true;
+                }
+
+                self.paste_text(text);
+                self.reset_cursor_blink();
+                self.refresh_search_matches_if_needed();
+                self.cache.clear();
+                self.scroll_to_cursor()
+            }
+            Message::ImeClosed => {
+                // 输入法关闭事件 (Closed)
+                // -------------------------------------------------------------
+                // 当输入法被关闭或切换回英文模式时触发。
+                // 动作：彻底清空预编辑状态，确保编辑器回到干净的普通输入模式。
+                // -------------------------------------------------------------
+                self.ime_preedit = None;
                 self.cache.clear();
                 Task::none()
             }
@@ -703,6 +778,30 @@ mod tests {
         // Should do nothing if there's no selection
         assert_eq!(editor.buffer.line(0), "hello world");
         assert_eq!(editor.cursor, (0, 5));
+    }
+
+    #[test]
+    fn test_ime_preedit_and_commit_chinese() {
+        let mut editor = CodeEditor::new("", "py");
+        // Simulate IME opened
+        let _ = editor.update(&Message::ImeOpened);
+        assert!(editor.ime_preedit.is_none());
+
+        // Preedit with Chinese content and a selection range
+        let content = "安全与合规".to_string();
+        let selection = Some(2..6); // byte-wise range inside UTF-8 string
+        let _ = editor
+            .update(&Message::ImePreedit(content.clone(), selection.clone()));
+
+        assert!(editor.ime_preedit.is_some());
+        assert_eq!(editor.ime_preedit.as_ref().unwrap().content, content);
+        assert_eq!(editor.ime_preedit.as_ref().unwrap().selection, selection);
+
+        // Commit should insert the text and clear preedit
+        let _ = editor.update(&Message::ImeCommit("安全与合规".to_string()));
+        assert!(editor.ime_preedit.is_none());
+        assert_eq!(editor.buffer.line(0), "安全与合规");
+        assert_eq!(editor.cursor, (0, "安全与合规".chars().count()));
     }
 
     #[test]

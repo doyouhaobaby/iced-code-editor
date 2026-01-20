@@ -41,12 +41,30 @@ impl CodeEditor {
         if start.0 == end.0 {
             // Single line selection
             let line = self.buffer.line(start.0);
-            result.push_str(&line[start.1..end.1]);
+            // 说明：
+            // - 本编辑器中的列索引（start.1 / end.1）是“字符索引”（按 Unicode 字符计数）
+            // - Rust 字符串底层是 UTF-8 字节序列，直接用字符索引做切片会导致“字节边界不合法”的 panic
+            // - 解决方案：通过 char_indices() 将“字符索引”转换为“字节索引”，再进行安全切片
+            // Convert UTF-8 character indices to byte indices for safe slicing
+            let start_byte = line
+                .char_indices()
+                .nth(start.1)
+                .map_or(line.len(), |(idx, _)| idx);
+            let end_byte = line
+                .char_indices()
+                .nth(end.1)
+                .map_or(line.len(), |(idx, _)| idx);
+            result.push_str(&line[start_byte..end_byte]);
         } else {
             // Multi-line selection
             // First line
             let first_line = self.buffer.line(start.0);
-            result.push_str(&first_line[start.1..]);
+            // 首行：从起始“字符索引”转换到字节位置后，安全截取至该行结尾
+            let start_byte = first_line
+                .char_indices()
+                .nth(start.1)
+                .map_or(first_line.len(), |(idx, _)| idx);
+            result.push_str(&first_line[start_byte..]);
             result.push('\n');
 
             // Middle lines
@@ -57,7 +75,12 @@ impl CodeEditor {
 
             // Last line
             let last_line = self.buffer.line(end.0);
-            result.push_str(&last_line[..end.1]);
+            // 末行：将结束“字符索引”转换为字节位置后，安全截取
+            let end_byte = last_line
+                .char_indices()
+                .nth(end.1)
+                .map_or(last_line.len(), |(idx, _)| idx);
+            result.push_str(&last_line[..end_byte]);
         }
 
         Some(result)
