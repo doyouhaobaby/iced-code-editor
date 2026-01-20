@@ -18,8 +18,12 @@ impl CodeEditor {
     /// Deletes the selected text.
     pub(crate) fn delete_selection(&mut self) {
         if let Some((start, end)) = self.get_selection_range() {
+            // 修改原因：当选区起止相同（零长度）时不执行删除，避免对零长度范围创建
+            // DeleteRangeCommand 导致空操作或污染历史；直接清除选区并返回
+            // 同时避免拦截删除操作
             if start == end {
-                return; // No selection
+                self.clear_selection();
+                return;
             }
 
             let mut cmd =
