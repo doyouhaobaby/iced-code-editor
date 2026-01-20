@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-None
+### Added
+
+- feat: allow changing the font of the editor
+  Default font: iced::Font::MONOSPACE
 
 ## [0.3.2] - 2026-01-16
 

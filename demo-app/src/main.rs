@@ -34,6 +34,52 @@ enum EditorId {
     Right,
 }
 
+/// Wrapper for Font to implement Display trait for pick_list.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FontOption {
+    name: &'static str,
+    font: iced::Font,
+}
+
+impl FontOption {
+    const MONOSPACE: FontOption = FontOption {
+        name: "Monospace (Default)",
+        font: iced::Font::MONOSPACE,
+    };
+
+    const SERIF: FontOption = FontOption {
+        name: "Serif",
+        font: iced::Font {
+            family: iced::font::Family::Serif,
+            ..iced::Font::DEFAULT
+        },
+    };
+
+    const SANS_SERIF: FontOption = FontOption {
+        name: "Sans Serif",
+        font: iced::Font {
+            family: iced::font::Family::SansSerif,
+            ..iced::Font::DEFAULT
+        },
+    };
+
+    const ALL: [FontOption; 3] = [
+        FontOption::MONOSPACE,
+        FontOption::SERIF,
+        FontOption::SANS_SERIF
+    ];
+
+    fn font(&self) -> iced::Font {
+        self.font
+    }
+}
+
+impl std::fmt::Display for FontOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
 /// Wrapper for Language to implement Display trait for pick_list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct LanguageOption(Language);
@@ -171,6 +217,8 @@ struct DemoApp {
     current_theme: Theme,
     /// Current UI language
     current_language: Language,
+    /// Current font
+    current_font: FontOption,
     /// Pane grid state
     panes: pane_grid::State<PaneType>,
     /// Log messages for output pane
@@ -206,6 +254,8 @@ enum Message {
     FileSaved(Result<PathBuf, String>),
     /// Cursor blink tick
     Tick,
+    /// Font changed
+    FontChanged(FontOption),
     /// UI Language changed
     LanguageChanged(LanguageOption),
     /// Theme changed
@@ -260,6 +310,8 @@ greet("World")
             "[INFO] Two editors initialized side by side".to_string(),
         ];
 
+        let current_font = FontOption::MONOSPACE;
+
         (
             Self {
                 editor_left: CodeEditor::new(default_content, "lua"),
@@ -269,6 +321,7 @@ greet("World")
                 error_message: None,
                 current_theme: Theme::TokyoNightStorm,
                 current_language: Language::English,
+                current_font,
                 panes,
                 log_messages,
                 search_replace_enabled_left: true,
@@ -408,6 +461,15 @@ greet("World")
                     .update(&EditorMessage::Tick)
                     .map(|e| Message::EditorEvent(EditorId::Right, e));
                 Task::batch([task_left, task_right])
+            }
+            Message::FontChanged(font_option) => {
+                self.log("INFO", &format!("Font changed to: {}", font_option.name));
+                self.current_font = font_option;
+                
+                let font = font_option.font();
+                self.editor_left.set_font(font);
+                self.editor_right.set_font(font);
+                Task::none()
             }
             Message::LanguageChanged(lang_option) => {
                 let new_language = lang_option.inner();
@@ -596,12 +658,19 @@ greet("World")
                 .style(move |_| text::Style { color: Some(text_color) }),
             Space::new().width(Length::Fill),
             mouse_area(
-                text_input("Test input...", &self.text_input_value)
+                text_input("Input for testing focus ...", &self.text_input_value)
                     .on_input(Message::TextInputChanged)
                     .width(200)
             )
             .on_press(Message::TextInputClicked),
             Space::new().width(10),
+            text("Font:")
+                .style(move |_| text::Style { color: Some(text_color) }),
+            pick_list(
+                FontOption::ALL,
+                Some(self.current_font),
+                Message::FontChanged
+            ),
             text("Language:")
                 .style(move |_| text::Style { color: Some(text_color) }),
             pick_list(

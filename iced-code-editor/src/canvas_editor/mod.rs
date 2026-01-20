@@ -94,6 +94,8 @@ pub struct CodeEditor {
     pub(crate) has_canvas_focus: bool,
     /// Whether to show the cursor (for rendering)
     pub(crate) show_cursor: bool,
+    /// The font used for rendering text
+    pub(crate) font: iced::Font,
 }
 
 /// Messages emitted by the code editor
@@ -229,7 +231,17 @@ impl CodeEditor {
             line_numbers_enabled: true,
             has_canvas_focus: false,
             show_cursor: false,
+            font: iced::Font::MONOSPACE,
         }
+    }
+
+    /// Sets the font used by the editor
+    ///
+    /// # Arguments
+    ///
+    /// * `font` - The iced font to set for the editor
+    pub fn set_font(&mut self, font: iced::Font) {
+        self.font = font;
     }
 
     /// Returns the current text content as a string.
