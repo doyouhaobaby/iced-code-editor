@@ -29,6 +29,13 @@ pub struct ImeRequester {
 }
 
 impl ImeRequester {
+    /// Creates a new IME requester widget.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether the IME interaction is enabled (usually true when editor is focused).
+    /// * `cursor` - The visual cursor position and size relative to the editor content.
+    /// * `preedit` - The current pre-edit text state, if any.
     pub fn new(
         enabled: bool,
         cursor: Rectangle,
@@ -156,5 +163,72 @@ where
     ) -> Option<iced::overlay::Element<'a, Message, iced::Theme, iced::Renderer>>
     {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::{Length, Point, Size};
+
+    /// Tests the initialization of ImeRequester.
+    ///
+    /// Verifies that:
+    /// 1. The enabled state is correctly stored.
+    /// 2. The cursor rectangle is preserved.
+    /// 3. The preedit content is correctly passed through.
+    #[test]
+    fn test_ime_requester_initialization() {
+        // Setup test data
+        let cursor = Rectangle::new(Point::new(10.0, 10.0), Size::new(2.0, 20.0));
+        let preedit = Some(input_method::Preedit {
+            content: "test".to_string(),
+            selection: None,
+            text_size: None,
+        });
+
+        // Create instance
+        let requester = ImeRequester::new(true, cursor, preedit.clone());
+
+        // Assertions
+        assert!(requester.enabled, "Should be enabled");
+        assert_eq!(requester.cursor, cursor, "Cursor rect should match");
+        
+        // Verify preedit content matches
+        if let Some(p) = requester.preedit {
+            assert_eq!(p.content, "test", "Preedit content should match");
+        } else {
+            panic!("Preedit should be Some");
+        }
+    }
+
+    /// Tests the Widget trait implementation details.
+    ///
+    /// Verifies that:
+    /// 1. size() returns Shrink/Shrink (invisible widget).
+    /// 2. tag() returns stateless tag.
+    /// 3. state() returns None (no internal state management needed).
+    #[test]
+    fn test_ime_requester_layout_properties() {
+        let cursor = Rectangle::new(Point::new(0.0, 0.0), Size::new(0.0, 0.0));
+        let requester = ImeRequester::new(false, cursor, None);
+
+        // Test size strategy - should be Shrink/Shrink
+        let size = <ImeRequester as Widget<(), iced::Theme, iced::Renderer>>::size(&requester);
+        assert_eq!(size.width, Length::Shrink, "Width should be Shrink");
+        assert_eq!(size.height, Length::Shrink, "Height should be Shrink");
+
+        // Test widget tag - should be stateless
+        assert_eq!(
+            <ImeRequester as Widget<(), iced::Theme, iced::Renderer>>::tag(&requester),
+            tree::Tag::stateless(),
+            "Widget should be stateless"
+        );
+
+        // Test widget state - should be None
+        assert!(matches!(
+            <ImeRequester as Widget<(), iced::Theme, iced::Renderer>>::state(&requester),
+            tree::State::None
+        ), "Widget state should be None");
     }
 }
