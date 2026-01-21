@@ -267,10 +267,13 @@ impl CodeEditor {
         }
     }
 
-    /// Sets the font used by the editor.
-    pub fn font(mut self, font: iced::Font) -> Self {
+    /// Sets the font used by the editor
+    ///
+    /// # Arguments
+    ///
+    /// * `font` - The iced font to set for the editor
+    pub fn set_font(&mut self, font: iced::Font) {
         self.font = font;
-        self
     }
 
     /// Returns the current text content as a string.
