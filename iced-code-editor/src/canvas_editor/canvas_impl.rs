@@ -630,7 +630,11 @@ impl canvas::Program<Message> for CodeEditor {
                         if let Some(range) = preedit.selection.as_ref() {
                             let caret_end =
                                 range.end.min(preedit.content.len());
-                            if caret_end <= preedit.content.len() {
+
+                            // Validate caret position to avoid panic on invalid UTF-8 boundary
+                            if caret_end <= preedit.content.len()
+                                && preedit.content.is_char_boundary(caret_end)
+                            {
                                 let caret_prefix =
                                     &preedit.content[..caret_end];
                                 let caret_x =
