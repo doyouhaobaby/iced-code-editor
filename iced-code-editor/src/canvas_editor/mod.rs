@@ -773,5 +773,38 @@ mod tests {
         let expected = FONT_SIZE;
         assert!((width - expected).abs() < 0.001, "Width mismatch for emoji");
     }
+
+    #[test]
+    fn test_measure_text_width_korean() {
+        // "안녕하세요" (5 chars)
+        // Korean characters are typically full-width.
+        // width = 5 * FONT_SIZE
+        let text = "안녕하세요";
+        let width = measure_text_width(text);
+        let expected = FONT_SIZE * 5.0;
+        assert!((width - expected).abs() < 0.001, "Width mismatch for Korean");
+    }
+
+    #[test]
+    fn test_measure_text_width_japanese() {
+        // "こんにちは" (Hiragana, 5 chars) -> 5 * FONT_SIZE
+        // "カタカナ" (Katakana, 4 chars) -> 4 * FONT_SIZE
+        // "漢字" (Kanji, 2 chars) -> 2 * FONT_SIZE
+        
+        let text_hiragana = "こんにちは";
+        let width_hiragana = measure_text_width(text_hiragana);
+        let expected_hiragana = FONT_SIZE * 5.0;
+        assert!((width_hiragana - expected_hiragana).abs() < 0.001, "Width mismatch for Hiragana");
+
+        let text_katakana = "カタカナ";
+        let width_katakana = measure_text_width(text_katakana);
+        let expected_katakana = FONT_SIZE * 4.0;
+        assert!((width_katakana - expected_katakana).abs() < 0.001, "Width mismatch for Katakana");
+
+        let text_kanji = "漢字";
+        let width_kanji = measure_text_width(text_kanji);
+        let expected_kanji = FONT_SIZE * 2.0;
+        assert!((width_kanji - expected_kanji).abs() < 0.001, "Width mismatch for Kanji");
+    }
 }
 
