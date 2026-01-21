@@ -309,11 +309,28 @@ impl CodeEditor {
 
     /// Sets the font size used by the editor
     ///
+    /// This will also automatically scale `char_width` to maintain the default proportions.
+    /// If `auto_adjust_line_height` is true, `line_height` will also be scaled to maintain
+    /// the default proportion (Line Height ~ 1.43x).
+    ///
     /// # Arguments
     ///
     /// * `size` - The font size in pixels
-    pub fn set_font_size(&mut self, size: f32) {
+    /// * `auto_adjust_line_height` - Whether to automatically adjust the line height
+    pub fn set_font_size(&mut self, size: f32, auto_adjust_line_height: bool) {
         self.font_size = size;
+
+        // Maintain default ratios based on initial constants
+        // LINE_HEIGHT / FONT_SIZE = 20.0 / 14.0
+        // CHAR_WIDTH / FONT_SIZE = 8.4 / 14.0
+        let char_width_ratio = CHAR_WIDTH / FONT_SIZE;
+        self.char_width = size * char_width_ratio;
+
+        if auto_adjust_line_height {
+            let line_height_ratio = LINE_HEIGHT / FONT_SIZE;
+            self.line_height = size * line_height_ratio;
+        }
+        
         self.cache.clear();
     }
 
@@ -343,25 +360,6 @@ impl CodeEditor {
     /// The line height in pixels
     pub fn line_height(&self) -> f32 {
         self.line_height
-    }
-
-    /// Sets the character width used by the editor
-    ///
-    /// # Arguments
-    ///
-    /// * `width` - The character width in pixels
-    pub fn set_char_width(&mut self, width: f32) {
-        self.char_width = width;
-        self.cache.clear();
-    }
-
-    /// Returns the current character width.
-    ///
-    /// # Returns
-    ///
-    /// The character width in pixels
-    pub fn char_width(&self) -> f32 {
-        self.char_width
     }
 
     /// Returns the current text content as a string.
@@ -907,6 +905,47 @@ mod tests {
         let width_kanji = measure_text_width(text_kanji, FONT_SIZE, CHAR_WIDTH);
         let expected_kanji = FONT_SIZE * 2.0;
         assert_eq!(compare_floats(width_kanji, expected_kanji), CmpOrdering::Equal, "Width mismatch for Kanji");
+    }
+
+    #[test]
+    fn test_set_font_size() {
+        let mut editor = CodeEditor::new("", "rs");
+        
+        // Initial state (defaults)
+        assert_eq!(editor.font_size(), 14.0);
+        assert_eq!(editor.line_height(), 20.0);
+        
+        // Test auto adjust = true
+        editor.set_font_size(28.0, true);
+        assert_eq!(editor.font_size(), 28.0);
+        // Line height should double: 20.0 * (28.0/14.0) = 40.0
+        assert_eq!(compare_floats(editor.line_height(), 40.0), CmpOrdering::Equal);
+        
+        // Test auto adjust = false
+        // First set line height to something custom
+        editor.set_line_height(50.0);
+        // Change font size but keep line height
+        editor.set_font_size(14.0, false);
+        assert_eq!(editor.font_size(), 14.0);
+        // Line height should stay 50.0
+        assert_eq!(compare_floats(editor.line_height(), 50.0), CmpOrdering::Equal);
+        // Char width should have scaled back to default 8.4 (since char_width is always adjusted)
+        assert_eq!(compare_floats(editor.char_width, CHAR_WIDTH), CmpOrdering::Equal);
+    }
+
+    #[test]
+    fn test_set_line_height() {
+        let mut editor = CodeEditor::new("", "rs");
+        
+        // Initial state
+        assert_eq!(editor.line_height(), LINE_HEIGHT);
+        
+        // Set custom line height
+        editor.set_line_height(35.0);
+        assert_eq!(editor.line_height(), 35.0);
+        
+        // Font size should remain unchanged
+        assert_eq!(editor.font_size(), FONT_SIZE);
     }
 }
 
