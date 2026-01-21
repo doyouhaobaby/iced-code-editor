@@ -24,6 +24,7 @@ fn main() -> iced::Result {
     iced::application(DemoApp::new, DemoApp::update, DemoApp::view)
         .subscription(DemoApp::subscription)
         .theme(DemoApp::theme)
+        .font(include_bytes!("../../fonts/JetBrainsMono-Regular.ttf").as_slice())
         .run()
 }
 
@@ -61,8 +62,20 @@ impl FontOption {
         },
     };
 
-    const ALL: [FontOption; 3] =
-        [FontOption::MONOSPACE, FontOption::SERIF, FontOption::SANS_SERIF];
+    const JETBRAINS_MONO: FontOption = FontOption {
+        name: "JetBrains Mono",
+        font: iced::Font {
+            family: iced::font::Family::Name("JetBrains Mono"),
+            ..iced::Font::DEFAULT
+        },
+    };
+
+    const ALL: [FontOption; 4] = [
+        FontOption::MONOSPACE,
+        FontOption::SERIF,
+        FontOption::SANS_SERIF,
+        FontOption::JETBRAINS_MONO,
+    ];
 
     fn font(&self) -> iced::Font {
         self.font
