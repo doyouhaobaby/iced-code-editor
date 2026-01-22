@@ -1,25 +1,30 @@
 name: Rust
-
 on:
   push:
     branches: ["main"]
-
 env:
   CARGO_TERM_COLOR: always
-
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Set up Rust
         uses: actions/checkout@v4
-
+      
+      - name: Install CJK fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra fontconfig
+          fc-cache -fv
+      
       - name: Build
         run: cargo build --verbose
+      
       - name: Clippy
         run: cargo clippy --verbose --all-targets
+      
       - name: Test
         run: cargo test --verbose
+      
       - name: Format Check
         run: cargo fmt -- --check
