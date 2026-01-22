@@ -63,8 +63,8 @@ pub struct WrappingCalculator {
     wrap_enabled: bool,
     /// Fixed wrap column (None = wrap at viewport width)
     wrap_column: Option<usize>,
-    /// Font size for wide characters
-    font_size: f32,
+    /// Full chat with for wide characters
+    full_char_width: f32,
     /// Character width for narrow characters
     char_width: f32,
 }
@@ -76,7 +76,7 @@ impl WrappingCalculator {
     ///
     /// * `wrap_enabled` - Whether line wrapping is enabled
     /// * `wrap_column` - Fixed wrap column, or None for viewport-based wrapping
-    /// * `font_size` - Font size in pixels
+    /// * `full_char_width` - Full chat with in pixels
     /// * `char_width` - Character width in pixels
     ///
     /// # Example
@@ -93,10 +93,10 @@ impl WrappingCalculator {
     pub fn new(
         wrap_enabled: bool,
         wrap_column: Option<usize>,
-        font_size: f32,
+        full_char_width: f32,
         char_width: f32,
     ) -> Self {
-        Self { wrap_enabled, wrap_column, font_size, char_width }
+        Self { wrap_enabled, wrap_column, full_char_width, char_width }
     }
 
     /// Calculates all visual lines from the text buffer.
@@ -150,7 +150,7 @@ impl WrappingCalculator {
 
             for (i, c) in line_content.chars().enumerate() {
                 // Compute pixel width for the current character
-                let char_width = super::measure_char_width(c, self.font_size, self.char_width);
+                let char_width = super::measure_char_width(c, self.full_char_width, self.char_width);
 
                 // If adding the current character exceeds wrap width, wrap at the previous char.
                 // Ensure at least one character per segment even if a single char exceeds wrap_width.

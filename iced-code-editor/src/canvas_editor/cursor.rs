@@ -18,7 +18,7 @@ impl CodeEditor {
                 let wrapping_calc = WrappingCalculator::new(
                     self.wrap_enabled,
                     self.wrap_column,
-                    self.font_size,
+                    self.full_char_width,
                     self.char_width,
                 );
                 let visual_lines = wrapping_calc.calculate_visual_lines(
@@ -133,7 +133,7 @@ impl CodeEditor {
         let wrapping_calc = WrappingCalculator::new(
             self.wrap_enabled,
             self.wrap_column,
-            self.font_size,
+            self.full_char_width,
             self.char_width,
         );
         let visual_lines = wrapping_calc.calculate_visual_lines(
@@ -166,7 +166,7 @@ impl CodeEditor {
         let mut col_offset = 0;
 
         for c in segment_text.chars() {
-            let char_width = super::measure_char_width(c, self.font_size, self.char_width);
+            let char_width = super::measure_char_width(c, self.full_char_width, self.char_width);
 
             if current_width + char_width / 2.0 > x_in_text {
                 break;
@@ -195,7 +195,7 @@ impl CodeEditor {
         let wrapping_calc = WrappingCalculator::new(
             self.wrap_enabled,
             self.wrap_column,
-            self.font_size,
+            self.full_char_width,
             self.char_width,
         );
         let visual_lines = wrapping_calc.calculate_visual_lines(
@@ -356,12 +356,12 @@ mod tests {
         let mut editor = CodeEditor::new("你好", "txt");
         editor.set_line_numbers_enabled(false);
 
-        let font_size = editor.font_size();
-        let half_width = font_size / 2.0;
+        let full_char_width = editor.full_char_width();
+        let half_width = full_char_width / 2.0;
         let padding = 5.0;
 
-        // Assume each CJK character is `font_size` wide.
-        // "你" is 0..font_size. "好" is font_size..2*font_size.
+        // Assume each CJK character is `full_char_width` wide.
+        // "你" is 0..full_char_width. "好" is full_char_width..2*full_char_width.
         //
         // Case 1: Click inside "你", at less than half its width.
         // Expect col 0
@@ -377,19 +377,19 @@ mod tests {
         assert_eq!(editor.cursor, (0, 1));
 
         // Case 3: Click inside "好", at less than half its width.
-        // "好" starts at font_size. Offset into "好" is < half_width.
+        // "好" starts at full_char_width. Offset into "好" is < half_width.
         // Expect col 1 (start of "好")
         editor.handle_mouse_click(Point::new(
-            (font_size + half_width - 2.0) + padding,
+            (full_char_width + half_width - 2.0) + padding,
             10.0,
         ));
         assert_eq!(editor.cursor, (0, 1));
 
         // Case 4: Click inside "好", at more than half its width.
-        // "好" starts at font_size. Offset into "好" is > half_width.
+        // "好" starts at full_char_width. Offset into "好" is > half_width.
         // Expect col 2 (end of "好")
         editor.handle_mouse_click(Point::new(
-            (font_size + half_width + 2.0) + padding,
+            (full_char_width + half_width + 2.0) + padding,
             10.0,
         ));
         assert_eq!(editor.cursor, (0, 2));

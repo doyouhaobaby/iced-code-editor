@@ -22,7 +22,7 @@ impl CodeEditor {
         let wrapping_calc = WrappingCalculator::new(
             self.wrap_enabled,
             self.wrap_column,
-            self.font_size,
+            self.full_char_width,
             self.char_width,
         );
 
@@ -171,7 +171,7 @@ impl CodeEditor {
                     + 5.0
                     + super::measure_text_width(
                         &prefix_text,
-                        self.font_size,
+                        self.full_char_width,
                         self.char_width,
                     );
 

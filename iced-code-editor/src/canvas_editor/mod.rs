@@ -45,9 +45,9 @@ pub(crate) const CURSOR_BLINK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(530);
 
 /// Measures the width of a single character.
-pub(crate) fn measure_char_width(c: char, font_size: f32, char_width: f32) -> f32 {
+pub(crate) fn measure_char_width(c: char, full_char_width: f32, char_width: f32) -> f32 {
     match c.width() {
-        Some(w) if w > 1 => font_size,
+        Some(w) if w > 1 => full_char_width,
         Some(_) => char_width,
         None => 0.0,
     }
@@ -60,11 +60,11 @@ pub(crate) fn measure_char_width(c: char, font_size: f32, char_width: f32) -> f3
 /// - Control characters have width 0.
 pub(crate) fn measure_text_width(
     text: &str,
-    font_size: f32,
+    full_char_width: f32,
     char_width: f32,
 ) -> f32 {
     text.chars()
-        .map(|c| measure_char_width(c, font_size, char_width))
+        .map(|c| measure_char_width(c, full_char_width, char_width))
         .sum()
 }
 
@@ -149,9 +149,15 @@ pub struct CodeEditor {
     pub(crate) show_cursor: bool,
     /// The font used for rendering text
     pub(crate) font: iced::Font,
+    /// IME pre-edit state (for CJK input)
     pub(crate) ime_preedit: Option<ImePreedit>,
+    /// Font size in pixels
     pub(crate) font_size: f32,
+    /// Full character width (wide chars like CJK) in pixels
+    pub(crate) full_char_width: f32,
+    /// Line height in pixels
     pub(crate) line_height: f32,
+    /// Character width in pixels
     pub(crate) char_width: f32,
 }
 
@@ -299,6 +305,7 @@ impl CodeEditor {
             font: iced::Font::MONOSPACE,
             ime_preedit: None,
             font_size: FONT_SIZE,
+            full_char_width: CHAR_WIDTH * 2.0,
             line_height: LINE_HEIGHT,
             char_width: CHAR_WIDTH,
         }
@@ -325,6 +332,7 @@ impl CodeEditor {
     /// * `auto_adjust_line_height` - Whether to automatically adjust the line height
     pub fn set_font_size(&mut self, size: f32, auto_adjust_line_height: bool) {
         self.font_size = size;
+        self.full_char_width = size;
 
         // Maintain default ratios based on initial constants
         // LINE_HEIGHT / FONT_SIZE = 20.0 / 14.0
@@ -347,6 +355,24 @@ impl CodeEditor {
     /// The font size in pixels
     pub fn font_size(&self) -> f32 {
         self.font_size
+    }
+
+    /// Returns the width of a standard narrow character in pixels.
+    ///
+    /// # Returns
+    ///
+    /// The character width in pixels
+    pub fn char_width(&self) -> f32 {
+        self.char_width
+    }
+
+    /// Returns the width of a wide character (e.g. CJK) in pixels.
+    ///
+    /// # Returns
+    ///
+    /// The full character width in pixels
+    pub fn full_char_width(&self) -> f32 {
+        self.full_char_width
     }
 
     /// Sets the line height used by the editor

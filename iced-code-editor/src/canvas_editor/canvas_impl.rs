@@ -34,14 +34,14 @@ fn calculate_segment_geometry(
     segment_start_col: usize,
     segment_end_col: usize,
     base_offset: f32,
-    font_size: f32,
+    full_char_width: f32,
     char_width: f32,
 ) -> (f32, f32) {
     // Calculate prefix width relative to visual line start
     let prefix_len = segment_start_col.saturating_sub(visual_start_col);
     let prefix_text: String =
         line_content.chars().skip(visual_start_col).take(prefix_len).collect();
-    let prefix_width = measure_text_width(&prefix_text, font_size, char_width);
+    let prefix_width = measure_text_width(&prefix_text, full_char_width, char_width);
 
     // Calculate segment width
     let segment_len = segment_end_col.saturating_sub(segment_start_col);
@@ -51,7 +51,7 @@ fn calculate_segment_geometry(
         .take(segment_len)
         .collect();
     let segment_width =
-        measure_text_width(&segment_text, font_size, char_width);
+        measure_text_width(&segment_text, full_char_width, char_width);
 
     (base_offset + prefix_width, segment_width)
 }
@@ -76,7 +76,7 @@ impl canvas::Program<Message> for CodeEditor {
             let wrapping_calc = WrappingCalculator::new(
                 self.wrap_enabled,
                 self.wrap_column,
-                self.font_size,
+                self.full_char_width,
                 self.char_width,
             );
             let visual_lines = wrapping_calc.calculate_visual_lines(
@@ -140,7 +140,7 @@ impl canvas::Program<Message> for CodeEditor {
                         // Calculate actual text width and center in gutter
                         let text_width = measure_text_width(
                             &line_num_text,
-                            self.font_size,
+                            self.full_char_width,
                             self.char_width,
                         );
                         let x_pos = (self.gutter_width() - text_width) / 2.0;
@@ -257,7 +257,7 @@ impl canvas::Program<Message> for CodeEditor {
 
                             x_offset += measure_text_width(
                                 segment_text,
-                                self.font_size,
+                                self.full_char_width,
                                 self.char_width,
                             );
                         }
@@ -330,7 +330,7 @@ impl canvas::Program<Message> for CodeEditor {
                                     search_match.col,
                                     search_match.col + query_len,
                                     self.gutter_width() + 5.0,
-                                    self.font_size,
+                                    self.full_char_width,
                                     self.char_width,
                                 );
                             let x_end = x_start + match_width;
@@ -378,7 +378,7 @@ impl canvas::Program<Message> for CodeEditor {
                                         sel_start_col,
                                         sel_end_col,
                                         self.gutter_width() + 5.0,
-                                        self.font_size,
+                                        self.full_char_width,
                                         self.char_width,
                                     );
                                 let x_end = x_start + sel_width;
@@ -433,7 +433,7 @@ impl canvas::Program<Message> for CodeEditor {
                                     start.1,
                                     end.1,
                                     self.gutter_width() + 5.0,
-                                    self.font_size,
+                                    self.full_char_width,
                                     self.char_width,
                                 );
                             let x_end = x_start + sel_width;
@@ -477,7 +477,7 @@ impl canvas::Program<Message> for CodeEditor {
                                         sel_start_col,
                                         sel_end_col,
                                         self.gutter_width() + 5.0,
-                                        self.font_size,
+                                        self.full_char_width,
                                         self.char_width,
                                     );
                                 let x_end = x_start + sel_width;
@@ -542,7 +542,7 @@ impl canvas::Program<Message> for CodeEditor {
                                     sel_start_col,
                                     sel_end_col,
                                     self.gutter_width() + 5.0,
-                                    self.font_size,
+                                    self.full_char_width,
                                     self.char_width,
                                 );
                             let x_end = x_start + sel_width;
@@ -602,7 +602,7 @@ impl canvas::Program<Message> for CodeEditor {
                         self.cursor.1,
                         self.cursor.1,
                         self.gutter_width() + 5.0,
-                        self.font_size,
+                        self.full_char_width,
                         self.char_width,
                     );
                     let cursor_y = cursor_visual as f32 * self.line_height;
@@ -610,7 +610,7 @@ impl canvas::Program<Message> for CodeEditor {
                     if let Some(preedit) = self.ime_preedit.as_ref() {
                         let preedit_width = measure_text_width(
                             &preedit.content,
-                            self.font_size,
+                            self.full_char_width,
                             self.char_width,
                         );
 
@@ -643,12 +643,12 @@ impl canvas::Program<Message> for CodeEditor {
                                 let selection_x = cursor_x
                                     + measure_text_width(
                                         selected_prefix,
-                                        self.font_size,
+                                        self.full_char_width,
                                         self.char_width,
                                     );
                                 let selection_w = measure_text_width(
                                     selected_text,
-                                    self.font_size,
+                                    self.full_char_width,
                                     self.char_width,
                                 );
 
@@ -698,7 +698,7 @@ impl canvas::Program<Message> for CodeEditor {
                                 let caret_x = cursor_x
                                     + measure_text_width(
                                         caret_prefix,
-                                        self.font_size,
+                                        self.full_char_width,
                                         self.char_width,
                                     );
 
@@ -745,7 +745,7 @@ impl canvas::Program<Message> for CodeEditor {
                         self.cursor.1,
                         self.cursor.1,
                         self.gutter_width() + 5.0,
-                        self.font_size,
+                        self.full_char_width,
                         self.char_width,
                     );
                     let cursor_y = cursor_visual as f32 * self.line_height;
