@@ -786,7 +786,7 @@ mod tests {
 
         // Preedit with Chinese content and a selection range
         let content = "安全与合规".to_string();
-        let selection = Some(2..6); // byte-wise range inside UTF-8 string
+        let selection = Some(0..3); // range aligned to UTF-8 character boundary
         let _ = editor
             .update(&Message::ImePreedit(content.clone(), selection.clone()));
 
