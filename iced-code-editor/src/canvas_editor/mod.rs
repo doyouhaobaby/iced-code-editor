@@ -5,6 +5,7 @@
 
 use iced::widget::operation::{RelativeOffset, snap_to};
 use iced::widget::{Id, canvas};
+use iced::advanced::text::{Paragraph, Text, Renderer as TextRenderer, Alignment};
 use std::cmp::Ordering as CmpOrdering;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -275,7 +276,7 @@ impl CodeEditor {
             FOCUSED_EDITOR_ID.store(editor_id, Ordering::Relaxed);
         }
 
-        Self {
+        let mut editor = Self {
             editor_id,
             buffer: TextBuffer::new(content),
             cursor: (0, 0),
@@ -308,7 +309,12 @@ impl CodeEditor {
             full_char_width: CHAR_WIDTH * 2.0,
             line_height: LINE_HEIGHT,
             char_width: CHAR_WIDTH,
-        }
+        };
+
+        // Perform initial character dimension calculation
+        editor.recalculate_char_dimensions(false);
+
+        editor
     }
 
     /// Sets the font used by the editor
@@ -318,11 +324,11 @@ impl CodeEditor {
     /// * `font` - The iced font to set for the editor
     pub fn set_font(&mut self, font: iced::Font) {
         self.font = font;
+        self.recalculate_char_dimensions(false);
     }
 
-    /// Sets the font size used by the editor
+    /// Sets the font size and recalculates character dimensions.
     ///
-    /// This will also automatically scale `char_width` to maintain the default proportions.
     /// If `auto_adjust_line_height` is true, `line_height` will also be scaled to maintain
     /// the default proportion (Line Height ~ 1.43x).
     ///
@@ -332,20 +338,47 @@ impl CodeEditor {
     /// * `auto_adjust_line_height` - Whether to automatically adjust the line height
     pub fn set_font_size(&mut self, size: f32, auto_adjust_line_height: bool) {
         self.font_size = size;
-        self.full_char_width = size;
+        self.recalculate_char_dimensions(auto_adjust_line_height);
+    }
 
-        // Maintain default ratios based on initial constants
-        // LINE_HEIGHT / FONT_SIZE = 20.0 / 14.0
-        // CHAR_WIDTH / FONT_SIZE = 8.4 / 14.0
-        let char_width_ratio = CHAR_WIDTH / FONT_SIZE;
-        self.char_width = size * char_width_ratio;
+    /// Recalculates character dimensions based on current font and size.
+    fn recalculate_char_dimensions(&mut self, auto_adjust_line_height: bool) {
+        self.char_width = self.measure_single_char_width("a");
+        // Use '汉' as a standard reference for CJK (Chinese, Japanese, Korean) wide characters
+        self.full_char_width = self.measure_single_char_width("汉");
+
+        // Fallback for infinite width measurements
+        if self.char_width.is_infinite() {
+            self.char_width = self.font_size / 2.0; // Rough estimate for monospace
+        }
+        
+        if self.full_char_width.is_infinite() {
+            self.full_char_width = self.font_size;
+        }
 
         if auto_adjust_line_height {
             let line_height_ratio = LINE_HEIGHT / FONT_SIZE;
-            self.line_height = size * line_height_ratio;
+            self.line_height = self.font_size * line_height_ratio;
         }
 
         self.cache.clear();
+    }
+
+    /// Measures the width of a single character string using the current font settings.
+    fn measure_single_char_width(&self, content: &str) -> f32 {
+        let text = Text {
+            content,
+            font: self.font,
+            size: iced::Pixels(self.font_size),
+            line_height: iced::advanced::text::LineHeight::default(),
+            bounds: iced::Size::new(f32::INFINITY, f32::INFINITY),
+            align_x: Alignment::Left,
+            align_y: iced::alignment::Vertical::Top,
+            shaping: iced::advanced::text::Shaping::Advanced,           
+            wrapping: iced::advanced::text::Wrapping::default(),
+        };
+        let p = <iced::Renderer as TextRenderer>::Paragraph::with_text(text);
+        p.min_width()
     }
 
     /// Returns the current font size.
@@ -1033,11 +1066,34 @@ mod tests {
             compare_floats(editor.line_height(), 50.0),
             CmpOrdering::Equal
         );
-        // Char width should have scaled back to default 8.4 (since char_width is always adjusted)
-        assert_eq!(
-            compare_floats(editor.char_width, CHAR_WIDTH),
-            CmpOrdering::Equal
-        );
+        // Char width should have scaled back to roughly default (but depends on measurement)
+        // We check if it is close to the expected value, but since measurement can vary,
+        // we just ensure it is positive and close to what we expect (around 8.4)
+        assert!(editor.char_width > 0.0);
+        assert!((editor.char_width - CHAR_WIDTH).abs() < 0.5);
+    }
+
+    #[test]
+    fn test_measure_single_char_width() {
+        let editor = CodeEditor::new("", "rs");
+        
+        // Measure 'a'
+        let width_a = editor.measure_single_char_width("a");
+        assert!(width_a > 0.0, "Width of 'a' should be positive");
+        
+        // Measure 'W' (usually wider than 'a' in proportional fonts, but this is monospace)
+        // In monospace, they should be roughly equal or equal.
+        // But iced::Font::MONOSPACE might not be strictly monospace in all environments? 
+        // It should be.
+        let width_w = editor.measure_single_char_width("W");
+        
+        // Measure Chinese char
+        let width_cjk = editor.measure_single_char_width("汉");
+        assert!(width_cjk > width_a, "Width of '汉' should be greater than 'a'");
+        
+        // Check that width_cjk is roughly double of width_a (common in terminal fonts)
+        // but we just check it is significantly larger
+        assert!(width_cjk >= width_a * 1.5);
     }
 
     #[test]
