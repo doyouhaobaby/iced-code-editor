@@ -105,6 +105,12 @@ where
         // 2. `RedrawRequested` starts the render cycle, ensuring the OS gets the
         //    latest caret position so the candidate window tracks movement.
         //
+        // NOTE: While it might seem beneficial to request IME updates on input events
+        // (like KeyPressed) for lower latency, doing so would use STALE cursor
+        // positions from the previous frame (because the widget hasn't been rebuilt
+        // with the new state yet). `RedrawRequested` guarantees we are using the
+        // fresh cursor position calculated in the latest `view()` pass.
+        //
         // Branches:
         // - enabled = true: editor active and focused. Request `InputMethod::Enabled`
         //   with the caret rectangle (cursor) and preedit content (preedit).
