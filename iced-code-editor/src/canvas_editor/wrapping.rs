@@ -8,7 +8,6 @@ use crate::text_buffer::TextBuffer;
 use std::cmp::Ordering;
 
 use super::compare_floats;
-use unicode_width::UnicodeWidthChar;
 
 /// Represents a visual line segment in the editor.
 ///
@@ -151,11 +150,7 @@ impl WrappingCalculator {
 
             for (i, c) in line_content.chars().enumerate() {
                 // Compute pixel width for the current character
-                let char_width = match c.width() {
-                    Some(w) if w > 1 => self.font_size, // wide characters (e.g. CJK)
-                    Some(_) => self.char_width, // narrow characters (e.g. Latin)
-                    None => 0.0,                // control characters
-                };
+                let char_width = super::measure_char_width(c, self.font_size, self.char_width);
 
                 // If adding the current character exceeds wrap width, wrap at the previous char.
                 // Ensure at least one character per segment even if a single char exceeds wrap_width.

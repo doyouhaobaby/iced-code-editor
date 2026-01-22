@@ -44,6 +44,15 @@ pub(crate) const GUTTER_WIDTH: f32 = 45.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(530);
 
+/// Measures the width of a single character.
+pub(crate) fn measure_char_width(c: char, font_size: f32, char_width: f32) -> f32 {
+    match c.width() {
+        Some(w) if w > 1 => font_size,
+        Some(_) => char_width,
+        None => 0.0,
+    }
+}
+
 /// Measures rendered text width, accounting for CJK wide characters.
 ///
 /// - Wide characters (e.g. Chinese) use FONT_SIZE.
@@ -55,14 +64,7 @@ pub(crate) fn measure_text_width(
     char_width: f32,
 ) -> f32 {
     text.chars()
-        .map(|c| {
-            // Check character width: 0 for control, 1 for half-width, 2 for full-width
-            match c.width() {
-                Some(w) if w > 1 => font_size,
-                Some(_) => char_width,
-                None => 0.0,
-            }
-        })
+        .map(|c| measure_char_width(c, font_size, char_width))
         .sum()
 }
 

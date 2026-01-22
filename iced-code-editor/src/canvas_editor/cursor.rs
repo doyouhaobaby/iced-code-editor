@@ -3,7 +3,6 @@
 use iced::widget::operation::scroll_to;
 use iced::widget::scrollable;
 use iced::{Point, Task};
-use unicode_width::UnicodeWidthChar;
 
 use super::wrapping::WrappingCalculator;
 use super::{ArrowDirection, CodeEditor, Message};
@@ -167,11 +166,7 @@ impl CodeEditor {
         let mut col_offset = 0;
 
         for c in segment_text.chars() {
-            let char_width = match c.width() {
-                Some(w) if w > 1 => self.font_size,
-                Some(_) => self.char_width,
-                None => 0.0,
-            };
+            let char_width = super::measure_char_width(c, self.font_size, self.char_width);
 
             if current_width + char_width / 2.0 > x_in_text {
                 break;
