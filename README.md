@@ -261,10 +261,16 @@ The default font of the editor is `iced::Font::MONOSPACE`. It can be changed wit
 
 ```rust
 let font = iced::font::Family::SansSerif;
-self.editor_left.set_font(font);
+editor.set_font(font);
 ```
 
 > The editor support CJK font.
+
+The default font size is **14px**. It can be changed:
+
+```rust
+editor.set_font_size(12.0, true);
+```
 
 ## Themes
 
