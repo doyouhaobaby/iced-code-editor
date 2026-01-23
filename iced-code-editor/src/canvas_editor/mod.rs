@@ -83,7 +83,7 @@ pub(crate) fn measure_char_width(
 /// * `char_width` - The width of a regular character
 ///
 /// # Returns
-/// 
+///
 /// The total calculated width of the text as a `f32`
 pub(crate) fn measure_text_width(
     text: &str,
