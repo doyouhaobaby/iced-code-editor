@@ -141,7 +141,12 @@ impl SearchState {
 
     /// Updates the matches list based on current query and options.
     pub fn update_matches(&mut self, buffer: &TextBuffer) {
-        self.matches = find_matches(buffer, &self.query, self.case_sensitive);
+        self.matches = find_matches(
+            buffer,
+            &self.query,
+            self.case_sensitive,
+            Some(MAX_MATCHES),
+        );
 
         // Update current match index
         if self.matches.is_empty() {
@@ -243,6 +248,7 @@ impl SearchState {
 /// * `buffer` - The text buffer to search in
 /// * `query` - The search string
 /// * `case_sensitive` - Whether to perform case-sensitive search
+/// * `limit` - Optional maximum number of matches to return
 ///
 /// # Returns
 ///
@@ -252,6 +258,7 @@ pub fn find_matches(
     buffer: &TextBuffer,
     query: &str,
     case_sensitive: bool,
+    limit: Option<usize>,
 ) -> Vec<SearchMatch> {
     if query.is_empty() {
         return Vec::new();
@@ -287,6 +294,7 @@ pub fn find_matches(
                             case_sensitive,
                             start,
                             end,
+                            limit,
                         )
                     }));
                 }
@@ -295,9 +303,11 @@ pub fn find_matches(
                 for handle in handles {
                     if let Ok(mut chunk_matches) = handle.join() {
                         matches.append(&mut chunk_matches);
-                        if matches.len() >= MAX_MATCHES {
-                            matches.truncate(MAX_MATCHES);
-                            break;
+                        if let Some(l) = limit {
+                            if matches.len() >= l {
+                                matches.truncate(l);
+                                break;
+                            }
                         }
                     }
                 }
@@ -306,7 +316,7 @@ pub fn find_matches(
         }
     }
 
-    find_matches_in_range(buffer, query, case_sensitive, 0, line_count)
+    find_matches_in_range(buffer, query, case_sensitive, 0, line_count, limit)
 }
 
 /// Threshold for line count to trigger parallel search.
@@ -350,6 +360,7 @@ fn find_matches_in_range(
     case_sensitive: bool,
     start_line: usize,
     end_line: usize,
+    limit: Option<usize>,
 ) -> Vec<SearchMatch> {
     let mut matches = Vec::new();
     let search_query = if case_sensitive {
@@ -360,8 +371,10 @@ fn find_matches_in_range(
 
     for line_idx in start_line..end_line {
         // Stop if we have enough matches
-        if matches.len() >= MAX_MATCHES {
-            break;
+        if let Some(l) = limit {
+            if matches.len() >= l {
+                break;
+            }
         }
 
         let line = buffer.line(line_idx);
@@ -414,7 +427,7 @@ mod tests {
     #[test]
     fn test_find_matches_case_sensitive() {
         let buffer = TextBuffer::new("Hello World\nhello world");
-        let matches = find_matches(&buffer, "hello", true);
+        let matches = find_matches(&buffer, "hello", true, None);
 
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].line, 1);
@@ -424,7 +437,7 @@ mod tests {
     #[test]
     fn test_find_matches_case_insensitive() {
         let buffer = TextBuffer::new("Hello World\nhello world");
-        let matches = find_matches(&buffer, "hello", false);
+        let matches = find_matches(&buffer, "hello", false, None);
 
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].line, 0);
@@ -436,7 +449,7 @@ mod tests {
     #[test]
     fn test_find_matches_multiple_occurrences() {
         let buffer = TextBuffer::new("foo bar foo baz foo");
-        let matches = find_matches(&buffer, "foo", false);
+        let matches = find_matches(&buffer, "foo", false, None);
 
         assert_eq!(matches.len(), 3);
         assert_eq!(matches[0].col, 0);
@@ -447,7 +460,7 @@ mod tests {
     #[test]
     fn test_find_matches_multiline() {
         let buffer = TextBuffer::new("line1\nfoo\nline3\nfoo");
-        let matches = find_matches(&buffer, "foo", false);
+        let matches = find_matches(&buffer, "foo", false, None);
 
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].line, 1);
@@ -457,7 +470,7 @@ mod tests {
     #[test]
     fn test_find_matches_empty_query() {
         let buffer = TextBuffer::new("Hello World");
-        let matches = find_matches(&buffer, "", false);
+        let matches = find_matches(&buffer, "", false, None);
 
         assert_eq!(matches.len(), 0);
     }
@@ -465,7 +478,7 @@ mod tests {
     #[test]
     fn test_find_matches_no_results() {
         let buffer = TextBuffer::new("Hello World");
-        let matches = find_matches(&buffer, "xyz", false);
+        let matches = find_matches(&buffer, "xyz", false, None);
 
         assert_eq!(matches.len(), 0);
     }
@@ -519,7 +532,7 @@ mod tests {
         }
         let buffer = TextBuffer::new(&content);
         
-        let matches = find_matches(&buffer, "foo", false);
+        let matches = find_matches(&buffer, "foo", false, None);
         
         assert_eq!(matches.len(), num_lines);
         assert_eq!(matches[0].line, 0);
@@ -541,7 +554,7 @@ mod tests {
         }
         let buffer = TextBuffer::new(&content);
 
-        let matches = find_matches(&buffer, "foo", false);
+        let matches = find_matches(&buffer, "foo", false, Some(MAX_MATCHES));
 
         // Should be capped at MAX_MATCHES
         assert_eq!(matches.len(), MAX_MATCHES);

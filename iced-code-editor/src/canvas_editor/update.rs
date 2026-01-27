@@ -483,8 +483,15 @@ impl CodeEditor {
                 Task::none()
             }
             Message::ReplaceAll => {
-                // Replace all matches in reverse order (to preserve positions)
-                if !self.search_state.matches.is_empty() {
+                // Perform a fresh search to find ALL matches (ignoring the display limit)
+                let all_matches = super::search::find_matches(
+                    &self.buffer,
+                    &self.search_state.query,
+                    self.search_state.case_sensitive,
+                    None, // No limit for Replace All
+                );
+
+                if !all_matches.is_empty() {
                     let query_len = self.search_state.query.chars().count();
                     let replace_text = self.search_state.replace_with.clone();
 
@@ -492,8 +499,8 @@ impl CodeEditor {
                     let mut composite =
                         CompositeCommand::new("Replace All".to_string());
 
-                    // Process matches in reverse order
-                    for match_pos in self.search_state.matches.iter().rev() {
+                    // Process matches in reverse order (to preserve positions)
+                    for match_pos in all_matches.iter().rev() {
                         let cmd = ReplaceTextCommand::new(
                             &self.buffer,
                             (match_pos.line, match_pos.col),
@@ -510,12 +517,12 @@ impl CodeEditor {
 
                     // Update matches (should be empty now)
                     self.search_state.update_matches(&self.buffer);
-
                     self.clear_selection();
                     self.cache.clear();
-                    return self.scroll_to_cursor();
+                    self.scroll_to_cursor()
+                } else {
+                    Task::none()
                 }
-                Task::none()
             }
             Message::SearchDialogTab => {
                 // Cycle focus forward (Search → Replace → Search)
