@@ -269,9 +269,8 @@ pub fn find_matches(
     // Use parallel search for larger files
     // Threshold can be tuned, but PARALLEL_SEARCH_THRESHOLD lines is a reasonable start to offset thread creation overhead
     if line_count > PARALLEL_SEARCH_THRESHOLD {
-        let num_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
+        let num_threads =
+            std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
 
         if num_threads > 1 {
             let chunk_size = (line_count + num_threads - 1) / num_threads;
@@ -531,13 +530,13 @@ mod tests {
             content.push_str(&format!("line {} foo\n", i));
         }
         let buffer = TextBuffer::new(&content);
-        
+
         let matches = find_matches(&buffer, "foo", false, None);
-        
+
         assert_eq!(matches.len(), num_lines);
         assert_eq!(matches[0].line, 0);
         assert_eq!(matches[num_lines - 1].line, num_lines - 1);
-        
+
         // Verify order is preserved (important!)
         for (i, m) in matches.iter().enumerate() {
             assert_eq!(m.line, i);

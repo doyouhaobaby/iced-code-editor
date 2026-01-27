@@ -132,29 +132,29 @@ impl canvas::Program<Message> for CodeEditor {
             // causes many inputs to be highlighted as plain text.
             let syntax_ref = match self.syntax.as_str() {
                 "python" => syntax_set.find_syntax_by_extension("py"),
-               "rust" => syntax_set.find_syntax_by_extension("rs"),
-                "javascript" =>  syntax_set.find_syntax_by_extension("js"),
+                "rust" => syntax_set.find_syntax_by_extension("rs"),
+                "javascript" => syntax_set.find_syntax_by_extension("js"),
                 "htm" => syntax_set.find_syntax_by_extension("html"),
-               "svg" => syntax_set.find_syntax_by_extension("xml"),
-               "markdown" => syntax_set.find_syntax_by_extension("md"),
-               "text" => Some(syntax_set.find_syntax_plain_text()),
+                "svg" => syntax_set.find_syntax_by_extension("xml"),
+                "markdown" => syntax_set.find_syntax_by_extension("md"),
+                "text" => Some(syntax_set.find_syntax_plain_text()),
                 _ => syntax_set.find_syntax_by_extension(self.syntax.as_str()),
-            }.or(Some(syntax_set.find_syntax_plain_text()));
+            }
+            .or(Some(syntax_set.find_syntax_plain_text()));
 
             // Choose the render range:
             // - If a cache window is defined, render that larger window
             //   to avoid frequent cache clears as the user scrolls.
             // - Otherwise, render only the current visible range.
-            let (start_idx, end_idx) =
-                if self.cache_window_end_line > self.cache_window_start_line {
-                    let s =
-                        self.cache_window_start_line.min(visual_lines.len());
-                    let e =
-                        self.cache_window_end_line.min(visual_lines.len());
-                    (s, e)
-                } else {
-                    (first_visible_line, last_visible_line)
-                };
+            let (start_idx, end_idx) = if self.cache_window_end_line
+                > self.cache_window_start_line
+            {
+                let s = self.cache_window_start_line.min(visual_lines.len());
+                let e = self.cache_window_end_line.min(visual_lines.len());
+                (s, e)
+            } else {
+                (first_visible_line, last_visible_line)
+            };
 
             for (idx, visual_line) in visual_lines
                 .iter()
@@ -364,11 +364,12 @@ impl canvas::Program<Message> for CodeEditor {
                         };
 
                         // Convert logical position to visual line
-                        let start_visual = WrappingCalculator::logical_to_visual(
-                            &visual_lines,
-                            search_match.line,
-                            search_match.col,
-                        );
+                        let start_visual =
+                            WrappingCalculator::logical_to_visual(
+                                &visual_lines,
+                                search_match.line,
+                                search_match.col,
+                            );
                         let end_visual = WrappingCalculator::logical_to_visual(
                             &visual_lines,
                             search_match.line,

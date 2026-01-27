@@ -97,6 +97,13 @@ pub(crate) fn measure_text_width(
 
 /// Epsilon value for floating-point comparisons in text layout.
 pub(crate) const EPSILON: f32 = 0.001;
+/// Multiplier used to extend the cached render window beyond the visible range.
+/// The cache window margin is computed as:
+///     margin = visible_lines_count * CACHE_WINDOW_MARGIN_MULTIPLIER
+/// A larger margin reduces how often we clear and rebuild the canvas cache when
+/// scrolling, improving performance on very large files while still ensuring
+/// correct initial rendering during the first scroll.
+pub(crate) const CACHE_WINDOW_MARGIN_MULTIPLIER: usize = 2;
 
 /// Compares two floating point numbers with a small epsilon tolerance.
 ///

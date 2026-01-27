@@ -10,7 +10,7 @@ use iced::{Element, Length};
 use iced_font_awesome::fa_icon_solid;
 
 use super::Message;
-use super::search::{SearchState, MAX_MATCHES};
+use super::search::{MAX_MATCHES, SearchState};
 use crate::i18n::Translations;
 
 /// Creates the search/replace dialog UI element.

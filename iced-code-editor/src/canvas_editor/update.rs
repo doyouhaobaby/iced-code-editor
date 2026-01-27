@@ -347,7 +347,8 @@ impl CodeEditor {
                     (new_scroll / self.line_height).floor() as usize;
                 let last_visible_line =
                     first_visible_line + visible_lines_count;
-                let margin = visible_lines_count * 2;
+                let margin = visible_lines_count
+                    * crate::canvas_editor::CACHE_WINDOW_MARGIN_MULTIPLIER;
                 let window_start = first_visible_line.saturating_sub(margin);
                 let window_end = last_visible_line + margin;
                 // Decide whether we need to re-window the cache.
@@ -356,7 +357,8 @@ impl CodeEditor {
                 let need_rewindow = if self.cache_window_end_line
                     > self.cache_window_start_line
                 {
-                    let lower_boundary_trigger = self.cache_window_start_line > 0
+                    let lower_boundary_trigger = self.cache_window_start_line
+                        > 0
                         && first_visible_line
                             < self
                                 .cache_window_start_line
@@ -789,9 +791,8 @@ mod tests {
 
     #[test]
     fn test_scroll_sets_initial_cache_window() {
-        let content = (0..200)
-            .map(|i| format!("line{}\n", i))
-            .collect::<String>();
+        let content =
+            (0..200).map(|i| format!("line{}\n", i)).collect::<String>();
         let mut editor = CodeEditor::new(&content, "py");
 
         // Simulate initial viewport
@@ -802,8 +803,7 @@ mod tests {
         // Expected derived ranges
         let visible_lines_count =
             (height / editor.line_height).ceil() as usize + 2;
-        let first_visible_line =
-            (scroll / editor.line_height).floor() as usize;
+        let first_visible_line = (scroll / editor.line_height).floor() as usize;
         let last_visible_line = first_visible_line + visible_lines_count;
         let margin = visible_lines_count * 2;
         let window_start = first_visible_line.saturating_sub(margin);
@@ -833,9 +833,8 @@ mod tests {
 
     #[test]
     fn test_small_scroll_keeps_window() {
-        let content = (0..200)
-            .map(|i| format!("line{}\n", i))
-            .collect::<String>();
+        let content =
+            (0..200).map(|i| format!("line{}\n", i)).collect::<String>();
         let mut editor = CodeEditor::new(&content, "py");
         let height = 400.0;
         let width = 800.0;
@@ -855,7 +854,8 @@ mod tests {
         editor.viewport_scroll = initial_scroll;
 
         // Small scroll inside window
-        let small_scroll = editor.line_height * (visible_lines_count as f32 / 4.0);
+        let small_scroll =
+            editor.line_height * (visible_lines_count as f32 / 4.0);
         let first_visible_line2 =
             (small_scroll / editor.line_height).floor() as usize;
         let last_visible_line2 = first_visible_line2 + visible_lines_count;
@@ -878,9 +878,8 @@ mod tests {
 
     #[test]
     fn test_large_scroll_rewindows() {
-        let content = (0..1000)
-            .map(|i| format!("line{}\n", i))
-            .collect::<String>();
+        let content =
+            (0..1000).map(|i| format!("line{}\n", i)).collect::<String>();
         let mut editor = CodeEditor::new(&content, "py");
         let height = 400.0;
         let width = 800.0;
