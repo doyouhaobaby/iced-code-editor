@@ -125,19 +125,33 @@ impl canvas::Program<Message> for CodeEditor {
             let theme_set = ThemeSet::load_defaults();
             let syntax_theme = &theme_set.themes["base16-ocean.dark"];
 
+            // Note: Extension-based lookup below falls back to plain text via
+            // `.or(Some(syntax_set.find_syntax_plain_text()))`. If `self.syntax`
+            // is a language name that doesn't match a known file extension or an
+            // unsupported extension, `syntect` returns `None` and the fallback
+            // causes many inputs to be highlighted as plain text.
             let syntax_ref = match self.syntax.as_str() {
-                "py" | "python" => syntax_set.find_syntax_by_extension("py"),
-                "lua" => syntax_set.find_syntax_by_extension("lua"),
-                "rs" | "rust" => syntax_set.find_syntax_by_extension("rs"),
-                "js" | "javascript" => {
-                    syntax_set.find_syntax_by_extension("js")
-                }
-                "html" | "htm" => syntax_set.find_syntax_by_extension("html"),
-                "xml" | "svg" => syntax_set.find_syntax_by_extension("xml"),
-                "css" => syntax_set.find_syntax_by_extension("css"),
-                "json" => syntax_set.find_syntax_by_extension("json"),
-                "md" | "markdown" => syntax_set.find_syntax_by_extension("md"),
-                _ => Some(syntax_set.find_syntax_plain_text()),
+                "python" => syntax_set.find_syntax_by_extension("py"),
+               "rust" => syntax_set.find_syntax_by_extension("rs"),
+                "javascript" =>  syntax_set.find_syntax_by_extension("js"),
+                "htm" => syntax_set.find_syntax_by_extension("html"),
+               "svg" => syntax_set.find_syntax_by_extension("xml"),
+               "markdown" => syntax_set.find_syntax_by_extension("md"),
+               "text" => Some(syntax_set.find_syntax_plain_text()),
+                _ => syntax_set.find_syntax_by_extension(self.syntax.as_str()),
+            }.or(Some(syntax_set.find_syntax_plain_text()));
+
+            let (start_idx, end_idx) = if self.cache_window_end_line
+                > self.cache_window_start_line
+            {
+                let s = self
+                    .cache_window_start_line
+                    .min(visual_lines.len());
+                let e =
+                    self.cache_window_end_line.min(visual_lines.len());
+                (s, e)
+            } else {
+                (first_visible_line, last_visible_line)
             };
 
             // Draw only visible lines (virtual scrolling optimization)
