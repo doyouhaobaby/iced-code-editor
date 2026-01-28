@@ -3,7 +3,6 @@
 ## Bugs
 
 - Ghost cursor and line highlight appears when scrolling or resizing window #8
-- Text disappear when scrolling with mouse #6
 
 ## Documentation
 

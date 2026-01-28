@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 None ;-)
 
+## [0.3.4] - 2026-01-28
+
+### Added
+
+- feat: automatic syntax highlighting for all file extensions supported by syntect
+
+### Fixed
+
+- fix: crashing when searching for "a" in a file with 99,000 or more entries and only 110,000 matches
+- fix: lag when performing a full replacement on a file with 100,000 or more entries
+- fix: crashing when searching for Chinese characters
+- fix: text disappear when scrolling with mouse ([#7](https://github.com/LuDog71FR/iced-code-editor/issues/7))
+
 ## [0.3.3] - 2026-01-22
 
 ### Fixed

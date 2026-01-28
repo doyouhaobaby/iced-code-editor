@@ -20,6 +20,7 @@
    - [Selection Rendering](#selection-rendering)
    - [Scroll-to-Cursor](#scroll-to-cursor)
    - [Internationalization (i18n)](#internationalization-i18n)
+   - [CJK and Asian Character Support](#cjk-and-asian-character-support)
 5. [Performance Considerations](#performance-considerations)
    - [Canvas Caching](#1-canvas-caching)
    - [Syntax Highlighting Optimization](#2-syntax-highlighting-optimization)
@@ -535,6 +536,209 @@ settings:
 
 **See also:** [docs/i18n.md](https://github.com/LuDog71FR/iced-code-editor/blob/main/docs/i18n.md) for detailed documentation.
 
+### CJK and Asian Character Support
+
+**Location:** `canvas_editor/mod.rs`, `canvas_editor/ime_requester.rs`, `canvas_editor/canvas_impl.rs`
+
+CJK characters (Chinese, Japanese, Korean) are "wide" characters that occupy twice the width of ASCII/Latin characters in monospace fonts. The editor must handle mixed-width text correctly for accurate cursor positioning, text selection, and rendering.
+
+**Architecture:**
+
+The editor uses a dual-width measurement system combined with Unicode-aware character classification and full IME (Input Method Editor) support for Asian language input.
+
+#### Character Width System
+
+Two distinct character widths are maintained and dynamically calculated based on the current font:
+
+```rust
+pub struct CodeEditor {
+    char_width: f32,       // Width of narrow characters (ASCII, Latin)
+    full_char_width: f32,  // Width of wide characters (CJK)
+    // ...
+}
+```
+
+**Width calculation** (`canvas_editor/mod.rs:398-435`):
+
+```rust
+fn recalculate_char_dimensions(&mut self, renderer: &Renderer) {
+    // Measure narrow character width using 'a'
+    self.char_width = self.measure_single_char_width(renderer, 'a');
+    
+    // Measure wide character width using '汉' (Chinese character)
+    self.full_char_width = self.measure_single_char_width(renderer, '\u{6c49}');
+    
+    // Fallback if measurements return infinite values
+    if !self.char_width.is_finite() {
+        self.char_width = self.font_size / 2.0;
+    }
+    if !self.full_char_width.is_finite() {
+        self.full_char_width = self.font_size;
+    }
+}
+```
+
+**Key characteristics:**
+
+- Widths are recalculated whenever font or font size changes
+- Uses actual font metrics from Iced's text measurement API
+- Fallback values ensure robustness (narrow = font_size/2, wide = font_size)
+
+#### Unicode Width Detection
+
+**Integration:** Uses `unicode_width` crate (implements Unicode Standard Annex #11 - East Asian Width)
+
+The `measure_char_width()` function classifies characters and returns appropriate width (`canvas_editor/mod.rs:61-96`):
+
+```rust
+pub(crate) fn measure_char_width(
+    c: char,
+    full_char_width: f32,
+    char_width: f32,
+) -> f32 {
+    use unicode_width::UnicodeWidthChar;
+    
+    match c.width() {
+        Some(w) if w > 1 => full_char_width,  // Wide (CJK)
+        Some(_) => char_width,                 // Narrow (ASCII/Latin)
+        None => 0.0,                           // Control characters
+    }
+}
+```
+
+**Character classification:**
+
+- **Wide (width > 1)**: CJK ideographs, full-width katakana/hiragana, full-width punctuation
+- **Narrow (width = 1)**: ASCII, Latin scripts, half-width characters
+- **Zero-width (None)**: Control characters, combining marks
+
+**Text measurement:**
+
+```rust
+pub(crate) fn measure_text_width(
+    text: &str,
+    full_char_width: f32,
+    char_width: f32,
+) -> f32 {
+    text.chars()
+        .map(|c| measure_char_width(c, full_char_width, char_width))
+        .sum()
+}
+```
+
+This approach provides O(n) accurate width calculation for any string containing mixed ASCII and CJK characters.
+
+#### IME (Input Method Editor) Support
+
+**Location:** `canvas_editor/ime_requester.rs`
+
+Asian languages require IME for input because they have thousands of characters that cannot be directly typed. The editor includes full IME support through the `ImeRequester` widget.
+
+**Architecture:**
+
+```rust
+pub struct ImeRequester {
+    enabled: bool,                  // IME state
+    cursor: Rectangle,              // Cursor position in widget coordinates
+    preedit: Option<Preedit>,       // Composition text before finalization
+}
+```
+
+**How it works:**
+
+1. **Invisible bridge**: `ImeRequester` is a zero-size widget that communicates with the OS IME system
+2. **Coordinate conversion**: Converts editor-relative cursor position to window-relative coordinates
+3. **Candidate window positioning**: Uses "over-the-spot" style to position IME candidate window near cursor
+4. **Preedit synchronization**: Manages composition text (characters being typed but not yet finalized)
+
+**Event handling:**
+
+```rust
+// On each RedrawRequested event
+Event::RedrawRequested(_) => {
+    if self.enabled {
+        // Convert cursor from widget-relative to window-relative coordinates
+        let window_cursor = Rectangle {
+            x: self.cursor.x + layout.position().x,
+            y: self.cursor.y + layout.position().y,
+            // ...
+        };
+        
+        // Request IME with updated cursor position
+        shell.request_input_method(InputMethod::Enabled {
+            cursor: window_cursor,
+            purpose: None,  // Over-the-spot positioning
+            preedit: self.preedit.clone(),
+        });
+    }
+}
+```
+
+**Why RedrawRequested?**
+
+IME candidate window positioning must use fresh cursor coordinates on every frame. This ensures the window follows cursor movement accurately, even during scrolling or window resize.
+
+**Supported operations:**
+
+- Enable/disable IME based on editor focus
+- Position candidate window relative to cursor
+- Display preedit (composition) text with selection
+- Handle multi-character input sequences (e.g., typing "nihon" → 日本)
+
+#### Rendering Integration
+
+Character widths are critical for correct visual rendering throughout the editor.
+
+**Cursor positioning** (`canvas_editor/mod.rs`):
+
+When clicking with the mouse, `measure_text_width()` determines which character the cursor should be placed at:
+
+```rust
+// Calculate click position by accumulating character widths
+let mut accumulated_width = 0.0;
+for (char_index, c) in line_text.chars().enumerate() {
+    let char_w = measure_char_width(c, self.full_char_width, self.char_width);
+    if click_x < accumulated_width + (char_w / 2.0) {
+        return char_index;  // Clicked before midpoint of character
+    }
+    accumulated_width += char_w;
+}
+```
+
+**Selection rendering** (`canvas_editor/canvas_impl.rs:293-297`):
+
+When rendering selections and syntax highlighting, x-offset is calculated using accurate character widths:
+
+```rust
+// In syntax highlighting loop
+for (style, segment_text) in line_regions {
+    // Calculate width of this colored segment
+    let segment_width = measure_text_width(
+        segment_text,
+        self.full_char_width,
+        self.char_width,
+    );
+    
+    // Draw text at correct position
+    frame.fill_text(Text { position: Point::new(x_offset, y), .. });
+    
+    // Advance position for next segment
+    x_offset += segment_width;
+}
+```
+
+**UTF-8 handling:**
+
+All text operations properly handle UTF-8 character boundaries to prevent panics when slicing strings containing multi-byte CJK characters.
+
+**Affected operations:**
+
+- Mouse click → cursor positioning
+- Text selection → rectangle geometry
+- Syntax highlighting → segment positioning
+- Horizontal scrolling → viewport calculations
+- Find/replace → match highlighting
+
 ## Performance Considerations
 
 ### 1. Canvas Caching
@@ -592,6 +796,35 @@ Iced automatically caches canvas frames. We clear the cache only when content ch
 
 - 1000-line file: ~50KB text + ~10KB history = ~60KB
 - Very manageable for modern systems
+
+### 5. CJK Character Width Calculation
+
+**Character width measurement:** O(n) per visible line per frame
+
+```rust
+// Called for every visible line during rendering
+let text_width = measure_text_width(line_text, full_char_width, char_width);
+```
+
+**Cost factors:**
+
+- Iterates through all characters in visible text
+- Unicode width lookup per character (fast hash table lookup)
+- Summation of widths
+
+**Optimization:**
+
+- Only visible lines are measured (virtual scrolling)
+- Width calculation is simple arithmetic (no complex geometry)
+- Typical visible area: ~50 lines × ~100 chars = ~5,000 operations per frame
+
+**Performance impact:**
+
+- **Negligible** for typical files with mixed ASCII/CJK content
+- **Acceptable** even for lines with 100% wide characters
+- Much faster than actual text rendering and syntax highlighting
+
+**Trade-off:** Accurate width calculation is essential for correct cursor positioning and selection rendering. The O(n) cost is unavoidable and well-optimized.
 
 ## Testing Strategy
 
