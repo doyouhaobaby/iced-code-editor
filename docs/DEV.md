@@ -26,6 +26,7 @@
    - [Syntax Highlighting Optimization](#2-syntax-highlighting-optimization)
    - [Text Buffer Performance](#3-text-buffer-performance)
    - [Memory Usage](#4-memory-usage)
+   - [CJK Character Width Calculation](#5-cjk-character-width-calculation)
 6. [Testing Strategy](#testing-strategy)
    - [Unit Tests](#unit-tests)
    - [Integration Tests](#integration-tests)
