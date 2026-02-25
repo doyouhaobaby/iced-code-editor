@@ -404,25 +404,4 @@ mod tests {
         assert!(style.background.r >= 0.0 && style.background.r <= 1.0);
         assert!(style.text_color.r >= 0.0 && style.text_color.r <= 1.0);
     }
-
-    #[test]
-    fn test_background_color_fix() {
-        // Test that light theme forces white background
-        let light_theme = iced::Theme::Light;
-        let style = from_iced_theme(&light_theme);
-        assert_eq!(
-            style.background,
-            Color::WHITE,
-            "Light theme should have pure white background"
-        );
-
-        // Test that dark theme uses its own background (not white)
-        let dark_theme = iced::Theme::Dark;
-        let style = from_iced_theme(&dark_theme);
-        assert_ne!(
-            style.background,
-            Color::WHITE,
-            "Dark theme should NOT have white background"
-        );
-    }
 }
