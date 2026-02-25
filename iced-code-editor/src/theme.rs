@@ -92,14 +92,7 @@ pub fn from_iced_theme(theme: &iced::Theme) -> Style {
     let is_dark = palette.is_dark;
 
     // Base colors from theme palette
-    let background = if is_dark {
-        palette.background.base.color
-    } else {
-        // Some light themes have off-white backgrounds that reduce contrast
-        // and make text look "washed out" or greyish. We force pure white
-        // to ensure crisp text rendering.
-        Color::WHITE
-    };
+    let background = palette.background.base.color;
     let text_color = palette.background.base.text;
 
     // Gutter colors: slightly offset from background for subtle distinction
