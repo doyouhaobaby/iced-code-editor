@@ -10,6 +10,8 @@ None
 
 ## Features
 
+feat: handle horizontal scrolling when line wrapping is disabled #13
+
 1. **Multiple cursors**
 
    - Simultaneous editing at multiple positions
@@ -34,6 +36,4 @@ None
 
 1. **Rope data structure** for better large-file performance
 2. **Incremental syntax highlighting** to avoid re-highlighting entire file
-3. **Virtual scrolling for horizontal** axis (long lines)
-4. **Web Worker for highlighting** (when targeting WASM)
-5. **Search & Replace** for better large-file performance
+3. **Web Worker for highlighting** (when targeting WASM)
