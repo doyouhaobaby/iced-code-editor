@@ -1,11 +1,12 @@
 // Imports for LSP (Language Server Protocol) functionality
 use super::{DemoApp, EditorId, Template};
+use crate::app::Message;
 use crate::lsp_config::{
     LspLanguage, lsp_language_for_path, lsp_language_for_template,
 };
 use crate::lsp_process_client::{LspEvent, LspProcessClient};
 use iced::Point;
-use iced::widget::text_editor;
+use iced::Task;
 use iced_code_editor::{LspDocument, LspPosition};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -313,7 +314,6 @@ impl DemoApp {
         self.lsp_hover_interactive = false;
         self.lsp_hover_pending = None;
         self.lsp_hover_hide_deadline = None;
-        self.lsp_hover_content = text_editor::Content::with_text("");
 
         // Only clear overlay editor if completion is not visible
         if !self.lsp_completion_visible {
@@ -323,9 +323,12 @@ impl DemoApp {
 
     /// Drains and processes all pending LSP events from the event channel
     /// Handles hover responses and completion items from the LSP server
-    pub(super) fn drain_lsp_events(&mut self) {
-        let Some(receiver) = self.lsp_events.take() else { return };
+    pub(super) fn drain_lsp_events(&mut self) -> Task<Message> {
+        let Some(receiver) = self.lsp_events.take() else {
+            return Task::none();
+        };
         let receiver = receiver;
+        let mut messages = Vec::new();
 
         loop {
             match receiver.try_recv() {
@@ -335,10 +338,11 @@ impl DemoApp {
                         if text.trim().is_empty() {
                             self.clear_lsp_hover();
                         } else {
-                            self.lsp_last_hover = Some(text);
+                            self.lsp_last_hover = Some(text.clone());
                             if let Some(hover) = self.lsp_last_hover.as_ref() {
-                                self.lsp_hover_content =
-                                    text_editor::Content::with_text(hover);
+                                self.lsp_hover_items =
+                                    iced::widget::markdown::parse(hover)
+                                        .collect();
                             }
                             self.lsp_hover_visible = true;
                             self.lsp_hover_hide_deadline = None;
@@ -360,6 +364,18 @@ impl DemoApp {
                             self.lsp_overlay_editor = Some(self.active_editor);
                         }
                     }
+                    // Handle definition response from LSP server
+                    LspEvent::Definition { uri, range } => {
+                        if let Some(path) =
+                            uri.strip_prefix("file://").map(PathBuf::from)
+                        {
+                            messages.push(Message::JumpToFile(
+                                path,
+                                range.start.line as usize,
+                                range.start.character as usize,
+                            ));
+                        }
+                    }
                 },
                 // No more events available right now
                 Err(mpsc::TryRecvError::Empty) => {
@@ -372,6 +388,16 @@ impl DemoApp {
                     break;
                 }
             }
+        }
+
+        if messages.is_empty() {
+            Task::none()
+        } else {
+            Task::batch(
+                messages
+                    .into_iter()
+                    .map(|msg| Task::perform(async move { msg }, |m| m)),
+            )
         }
     }
 }

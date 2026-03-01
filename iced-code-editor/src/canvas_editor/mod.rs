@@ -8,7 +8,7 @@ use iced::advanced::text::{
 };
 use iced::widget::operation::{RelativeOffset, snap_to};
 use iced::widget::{Id, canvas};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering as CmpOrdering;
 use std::ops::Range;
 use std::rc::Rc;
@@ -229,6 +229,11 @@ pub struct CodeEditor {
     pub(crate) focus_locked: bool,
     /// Whether to show the cursor (for rendering)
     pub(crate) show_cursor: bool,
+    /// Current keyboard modifiers state (Ctrl, Alt, Shift, Logo).
+    ///
+    /// This is updated via subscription events and used to handle modifier-dependent
+    /// interactions, such as "Ctrl+Click" for jumping to a definition.
+    pub(crate) modifiers: Cell<iced::keyboard::Modifiers>,
     /// The font used for rendering text
     pub(crate) font: iced::Font,
     /// IME pre-edit state (for CJK input)
@@ -367,6 +372,10 @@ pub enum Message {
     CanvasFocusGained,
     /// Canvas lost focus (external widget interaction)
     CanvasFocusLost,
+    /// Triggered when the user performs a Ctrl+Click (or Cmd+Click on macOS)
+    /// on the editor content, intending to jump to the definition of the symbol
+    /// under the cursor.
+    JumpClick(iced::Point),
     /// IME input method opened
     ImeOpened,
     /// IME pre-edit update (content, selection range)
@@ -442,6 +451,7 @@ impl CodeEditor {
             has_canvas_focus: false,
             focus_locked: false,
             show_cursor: false,
+            modifiers: Cell::new(iced::keyboard::Modifiers::default()),
             font: iced::Font::MONOSPACE,
             ime_preedit: None,
             font_size: FONT_SIZE,
@@ -1016,7 +1026,7 @@ impl CodeEditor {
     /// Returns the word-start column in a line for a given column.
     ///
     /// Word characters include ASCII alphanumerics and underscore.
-    fn word_start_in_line(line: &str, col: usize) -> usize {
+    pub(crate) fn word_start_in_line(line: &str, col: usize) -> usize {
         let chars: Vec<char> = line.chars().collect();
         if chars.is_empty() {
             return 0;
@@ -1038,8 +1048,40 @@ impl CodeEditor {
         idx
     }
 
+    /// Returns the word-end column in a line for a given column.
+    pub(crate) fn word_end_in_line(line: &str, col: usize) -> usize {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            return 0;
+        }
+        let mut idx = col.min(chars.len());
+        if idx == chars.len() {
+            idx = idx.saturating_sub(1);
+        }
+
+        // If current char is not a word char, check if previous was (we might be just after the word)
+        if !Self::is_word_char(chars[idx]) {
+            if idx > 0 && Self::is_word_char(chars[idx - 1]) {
+                // We are just after a word, so idx is the end (exclusive)
+                // But wait, if we are at the space after "foo", idx points to space.
+                // "foo " -> ' ' is at 3. word_end should be 3.
+                // So if chars[idx] is not word char, and chars[idx-1] IS, then idx is the end.
+                return idx;
+            } else {
+                // Not on a word
+                return col.min(chars.len());
+            }
+        }
+
+        // If we are on a word char, scan forward
+        while idx < chars.len() && Self::is_word_char(chars[idx]) {
+            idx += 1;
+        }
+        idx
+    }
+
     /// Returns true when the character is part of an identifier-style word.
-    fn is_word_char(ch: char) -> bool {
+    pub(crate) fn is_word_char(ch: char) -> bool {
         ch == '_' || ch.is_alphanumeric()
     }
 
@@ -1416,12 +1458,47 @@ impl CodeEditor {
             Some(VisualLinesCache { key, visual_lines: visual_lines.clone() });
         visual_lines
     }
+
+    /// Initiates a "Go to Definition" request for the symbol at the current cursor position.
+    ///
+    /// This method converts the current cursor coordinates into an LSP-compatible position
+    /// and delegates the request to the active `LspClient`, if one is attached.
+    pub fn lsp_request_definition(&mut self) {
+        let position = self.lsp_position_from_cursor();
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_definition(document, position);
+        }
+    }
+
+    /// Initiates a "Go to Definition" request for the symbol at the specified screen coordinates.
+    ///
+    /// This is typically used for mouse interactions (e.g., Ctrl+Click). It first resolves
+    /// the screen coordinates to a text position and then sends the request.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the request was successfully sent (i.e., a valid position was found and an LSP client is active),
+    /// `false` otherwise.
+    pub fn lsp_request_definition_at(&mut self, point: iced::Point) -> bool {
+        let Some(position) = self.lsp_position_from_point(point) else {
+            return false;
+        };
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_definition(document, position);
+            return true;
+        }
+        false
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     #[test]

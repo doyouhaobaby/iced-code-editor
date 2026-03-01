@@ -1199,6 +1199,11 @@ impl CodeEditor {
             Message::HorizontalScrolled(viewport) => {
                 self.handle_horizontal_scrolled_msg(*viewport)
             }
+
+            // Handle the "Jump to Definition" action triggered by Ctrl+Click.
+            // Currently, this returns `Task::none()` as the actual navigation logic
+            // is delegated to the `LspClient` implementation or handled elsewhere.
+            Message::JumpClick(_point) => Task::none(),
         }
     }
 }

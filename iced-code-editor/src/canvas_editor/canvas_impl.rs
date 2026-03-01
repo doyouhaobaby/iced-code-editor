@@ -1163,6 +1163,16 @@ impl CodeEditor {
         match event {
             mouse::Event::ButtonPressed(mouse::Button::Left) => {
                 cursor.position_in(bounds).map(|position| {
+                    // Check for Ctrl (or Command on macOS) + Click
+                    #[cfg(target_os = "macos")]
+                    let is_jump_click = self.modifiers.get().command();
+                    #[cfg(not(target_os = "macos"))]
+                    let is_jump_click = self.modifiers.get().control();
+
+                    if is_jump_click {
+                        return Action::publish(Message::JumpClick(position));
+                    }
+
                     // Don't capture the event so it can bubble up for focus management
                     // This implements focus event propagation through the widget hierarchy
                     Action::publish(Message::MouseClick(position))
@@ -1246,6 +1256,88 @@ impl CodeEditor {
         };
 
         Some(Action::publish(message).and_capture())
+    }
+}
+
+impl CodeEditor {
+    /// Draws underlines for jumpable links when modifier is held.
+    fn draw_jump_link_highlight(
+        &self,
+        frame: &mut canvas::Frame,
+        ctx: &RenderContext,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) {
+        #[cfg(target_os = "macos")]
+        let modifier_active = self.modifiers.get().command();
+        #[cfg(not(target_os = "macos"))]
+        let modifier_active = self.modifiers.get().control();
+
+        if !modifier_active {
+            return;
+        }
+
+        let Some(point) = cursor.position_in(bounds) else {
+            return;
+        };
+
+        if let Some((line, col)) = self.calculate_cursor_from_point(point) {
+            let line_content = self.buffer.line(line);
+
+            let start_col = Self::word_start_in_line(line_content, col);
+            let end_col = Self::word_end_in_line(line_content, col);
+
+            if start_col >= end_col {
+                return;
+            }
+
+            // Find the first visual line for this logical line
+            if let Some(mut idx) =
+                WrappingCalculator::logical_to_visual(ctx.visual_lines, line, 0)
+            {
+                // Iterate all visual lines belonging to this logical line
+                while idx < ctx.visual_lines.len() {
+                    let visual_line = &ctx.visual_lines[idx];
+                    if visual_line.logical_line != line {
+                        break;
+                    }
+
+                    // Check intersection
+                    let seg_start = visual_line.start_col.max(start_col);
+                    let seg_end = visual_line.end_col.min(end_col);
+
+                    if seg_start < seg_end {
+                        let (x, width) = calculate_segment_geometry(
+                            line_content,
+                            visual_line.start_col,
+                            seg_start,
+                            seg_end,
+                            ctx.gutter_width + 5.0
+                                - ctx.horizontal_scroll_offset,
+                            ctx.full_char_width,
+                            ctx.char_width,
+                        );
+
+                        let y = idx as f32 * ctx.line_height + ctx.line_height; // Underline at bottom
+
+                        // Draw underline
+                        let path = canvas::Path::line(
+                            Point::new(x, y),
+                            Point::new(x + width, y),
+                        );
+
+                        frame.stroke(
+                            &path,
+                            canvas::Stroke::default()
+                                .with_color(self.style.text_color) // Use text color or link color
+                                .with_width(1.0),
+                        );
+                    }
+
+                    idx += 1;
+                }
+            }
+        }
     }
 }
 
@@ -1421,6 +1513,7 @@ impl canvas::Program<Message> for CodeEditor {
 
                 self.draw_search_highlights(frame, &ctx, start_idx, end_idx);
                 self.draw_selection_highlight(frame, &ctx);
+                self.draw_jump_link_highlight(frame, &ctx, bounds, _cursor);
                 self.draw_cursor(frame, &ctx);
             });
 
@@ -1447,13 +1540,27 @@ impl canvas::Program<Message> for CodeEditor {
         cursor: mouse::Cursor,
     ) -> Option<Action<Message>> {
         match event {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                self.modifiers.set(*modifiers);
+                None
+            }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
                 modifiers,
                 text,
                 ..
-            }) => self
-                .handle_keyboard_event(key, modifiers, text, bounds, &cursor),
+            }) => {
+                self.modifiers.set(*modifiers);
+                self.handle_keyboard_event(
+                    key, modifiers, text, bounds, &cursor,
+                )
+            }
+            Event::Keyboard(keyboard::Event::KeyReleased {
+                modifiers, ..
+            }) => {
+                self.modifiers.set(*modifiers);
+                None
+            }
             Event::Mouse(mouse_event) => {
                 self.handle_mouse_event(mouse_event, bounds, &cursor)
             }

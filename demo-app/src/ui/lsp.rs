@@ -6,8 +6,8 @@
 use crate::app::{DemoApp, Message};
 use crate::types::EditorId;
 use iced::widget::{
-    Id, Space, button, column, container, mouse_area, row, scrollable, stack,
-    text, text_editor,
+    Space, button, column, container, markdown, mouse_area, row, scrollable,
+    stack, text,
 };
 use iced::{Background, Border, Color, Element, Length, Point, Shadow, Theme};
 use iced_code_editor::CodeEditor;
@@ -102,34 +102,21 @@ pub fn view_lsp_overlay(
             };
             let hover_width = content_width + hover_padding * 2.0;
 
-            // Build the scrollable hover content with a text editor
-            // Using text_editor allows users to copy text from the hover tooltip
+            // Parse markdown content
+            let palette = app.current_theme.palette();
+            let markdown_settings = markdown::Settings::with_text_size(
+                app.current_font_size,
+                markdown::Style::from_palette(palette),
+            );
+
+            // Build the scrollable hover content with markdown view
             let hover_content = scrollable(
                 container(
-                    text_editor(&app.lsp_hover_content)
-                        .id(Id::new("lsp_hover_text_editor"))
-                        .on_action(Message::LspHoverContentAction)
-                        .padding(hover_padding)
-                        .width(hover_width)
-                        // Style the text editor to blend with the hover container
-                        .style(|theme: &Theme, _status| {
-                            let palette = theme.extended_palette();
-                            text_editor::Style {
-                                background: Background::Color(
-                                    Color::TRANSPARENT,
-                                ),
-                                border: Border {
-                                    radius: 0.0.into(),
-                                    width: 0.0,
-                                    color: Color::TRANSPARENT,
-                                },
-                                placeholder: palette.background.weak.text,
-                                value: palette.background.weak.text,
-                                selection: palette.primary.weak.color,
-                            }
-                        }),
+                    markdown::view(&app.lsp_hover_items, markdown_settings)
+                        .map(|_| Message::LspHoverEntered),
                 )
-                .width(Length::Fixed(hover_width)),
+                .width(Length::Fixed(hover_width))
+                .padding(hover_padding),
             )
             .height(Length::Fixed(scroll_height))
             .width(Length::Fixed(hover_width))
@@ -312,10 +299,12 @@ pub fn view_lsp_overlay(
                 item.clone()
             };
             completion_items.push(
-                button(text(label).size(12))
-                    .on_press(Message::LspCompletionSelected(index))
-                    .padding(4)
-                    .into(),
+                button(text(label).size(12).line_height(
+                    iced::widget::text::LineHeight::Relative(1.5),
+                ))
+                .on_press(Message::LspCompletionSelected(index))
+                .padding(4)
+                .into(),
             );
         }
 

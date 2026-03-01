@@ -134,6 +134,8 @@ enum LspRequestKind {
     Hover,
     /// Completion request - provides auto-complete suggestions
     Completion,
+    /// Definition request - go to definition
+    Definition,
 }
 
 // =============================================================================
@@ -146,6 +148,8 @@ pub(crate) enum LspEvent {
     Hover { text: String },
     /// Completion items received
     Completion { items: Vec<String> },
+    /// Definition location received
+    Definition { uri: String, range: iced_code_editor::LspRange },
 }
 
 // =============================================================================
@@ -314,6 +318,16 @@ impl LspProcessClient {
                                 if !items.is_empty() {
                                     let _ = events_reader
                                         .send(LspEvent::Completion { items });
+                                }
+                            }
+                            // Handle definition response
+                            LspRequestKind::Definition => {
+                                if let Some((uri, range)) =
+                                    parse_definition_location(result)
+                                {
+                                    let _ = events_reader.send(
+                                        LspEvent::Definition { uri, range },
+                                    );
                                 }
                             }
                         }
@@ -503,6 +517,90 @@ fn parse_completion_items(result: &serde_json::Value) -> Vec<String> {
         .collect()
 }
 
+/// Parses definition location from an LSP definition response.
+/// Handles Location, Location[], and LocationLink[] responses.
+fn parse_definition_location(
+    result: &serde_json::Value,
+) -> Option<(String, iced_code_editor::LspRange)> {
+    // Helper to extract uri and range from a Location object
+    fn extract_location(
+        loc: &serde_json::Value,
+    ) -> Option<(String, iced_code_editor::LspRange)> {
+        let uri = loc.get("uri")?.as_str()?.to_string();
+        let range_val = loc.get("range")?;
+
+        let start = range_val.get("start")?;
+        let end = range_val.get("end")?;
+
+        let start_line = start.get("line")?.as_u64()? as usize;
+        let start_char = start.get("character")?.as_u64()? as usize;
+        let end_line = end.get("line")?.as_u64()? as usize;
+        let end_char = end.get("character")?.as_u64()? as usize;
+
+        Some((
+            uri,
+            iced_code_editor::LspRange {
+                start: iced_code_editor::LspPosition {
+                    line: start_line as u32,
+                    character: start_char as u32,
+                },
+                end: iced_code_editor::LspPosition {
+                    line: end_line as u32,
+                    character: end_char as u32,
+                },
+            },
+        ))
+    }
+
+    // Helper to extract uri and range from a LocationLink object
+    fn extract_link(
+        link: &serde_json::Value,
+    ) -> Option<(String, iced_code_editor::LspRange)> {
+        let uri = link.get("targetUri")?.as_str()?.to_string();
+        let range_val =
+            link.get("targetSelectionRange").or(link.get("targetRange"))?;
+
+        let start = range_val.get("start")?;
+        let end = range_val.get("end")?;
+
+        let start_line = start.get("line")?.as_u64()? as usize;
+        let start_char = start.get("character")?.as_u64()? as usize;
+        let end_line = end.get("line")?.as_u64()? as usize;
+        let end_char = end.get("character")?.as_u64()? as usize;
+
+        Some((
+            uri,
+            iced_code_editor::LspRange {
+                start: iced_code_editor::LspPosition {
+                    line: start_line as u32,
+                    character: start_char as u32,
+                },
+                end: iced_code_editor::LspPosition {
+                    line: end_line as u32,
+                    character: end_char as u32,
+                },
+            },
+        ))
+    }
+
+    if let Some(array) = result.as_array() {
+        if let Some(first) = array.first() {
+            // Check if it's a LocationLink (has targetUri) or Location (has uri)
+            if first.get("targetUri").is_some() {
+                extract_link(first)
+            } else {
+                extract_location(first)
+            }
+        } else {
+            None
+        }
+    } else if result.is_object() {
+        extract_location(result)
+    } else {
+        None
+    }
+}
+
 // =============================================================================
 // LspClient Trait Implementation
 // =============================================================================
@@ -655,6 +753,39 @@ impl LspClient for LspProcessClient {
                 "textDocument": { "uri": document.uri },
                 "position": { "line": pos.line, "character": pos.character },
                 "context": { "triggerKind": 1 }  // Invoked = 1
+            }
+        });
+        self.send_message(&msg);
+    }
+
+    /// Requests definition at a specific position.
+    /// The response will be sent as an LspEvent::Definition via the events channel.
+    fn request_definition(
+        &mut self,
+        document: &LspDocument,
+        position: LspPosition,
+    ) {
+        // Get the document state and convert position to UTF-16
+        let docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(state) = docs.get(&document.uri) else { return };
+        let pos = state.text.to_utf16_position(position);
+
+        // Generate a request ID and track it
+        let id = self.next_id();
+        {
+            let mut pending =
+                self.pending_requests.lock().unwrap_or_else(|e| e.into_inner());
+            pending.insert(id, LspRequestKind::Definition);
+        }
+
+        // Send the definition request
+        let msg = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "textDocument/definition",
+            "params": {
+                "textDocument": { "uri": document.uri },
+                "position": { "line": pos.line, "character": pos.character }
             }
         });
         self.send_message(&msg);

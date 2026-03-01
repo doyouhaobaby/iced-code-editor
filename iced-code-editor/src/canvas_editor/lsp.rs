@@ -74,6 +74,17 @@ pub trait LspClient {
         _position: LspPosition,
     ) {
     }
+    /// Requests the definition location(s) for the symbol at the given position.
+    ///
+    /// This method is called when the user triggers a "Go to Definition" action
+    /// (e.g., via Ctrl+Click or a context menu). The client implementation should
+    /// send a `textDocument/definition` request to the LSP server.
+    fn request_definition(
+        &mut self,
+        _document: &LspDocument,
+        _position: LspPosition,
+    ) {
+    }
 }
 
 /// Computes a minimal text change between two snapshots.

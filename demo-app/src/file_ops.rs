@@ -95,3 +95,16 @@ pub async fn save_file_as_dialog(content: String) -> Result<PathBuf, String> {
         Err("Save cancelled".to_string())
     }
 }
+
+/// Reads a file from the given path.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn read_file(path: PathBuf) -> Result<(PathBuf, String), String> {
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Unable to read file: {}", e))?;
+    Ok((path, content))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn read_file(path: PathBuf) -> Result<(PathBuf, String), String> {
+    Err("Reading files by path is not supported on Web".to_string())
+}

@@ -3,8 +3,6 @@ use crate::file_ops;
 use crate::lsp_process_client::LspEvent;
 use crate::types::{EditorId, FontOption, LanguageOption, PaneType, Template};
 use iced::widget::operation::focus;
-#[cfg(not(target_arch = "wasm32"))]
-use iced::widget::text_editor;
 use iced::widget::{Id, pane_grid};
 use iced::{Event, Point, Subscription, Task, Theme, event, mouse, window};
 #[cfg(not(target_arch = "wasm32"))]
@@ -78,7 +76,7 @@ pub struct DemoApp {
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_last_completion: Vec<String>,
     #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_hover_content: text_editor::Content,
+    pub lsp_hover_items: Vec<iced::widget::markdown::Item>,
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_hover_visible: bool,
     #[cfg(not(target_arch = "wasm32"))]
@@ -155,11 +153,12 @@ pub enum Message {
     /// Test text input clicked
     TextInputClicked,
     #[cfg(not(target_arch = "wasm32"))]
-    LspHoverContentAction(text_editor::Action),
     LspHoverEntered,
     LspHoverExited,
     LspCompletionSelected(usize),
     LspCompletionClosed,
+    JumpToFile(PathBuf, usize, usize),
+    FileOpenedAndJump(Result<(PathBuf, String, usize, usize), String>),
 }
 
 impl DemoApp {
@@ -250,7 +249,7 @@ greet("World")
             #[cfg(not(target_arch = "wasm32"))]
             lsp_last_completion: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
-            lsp_hover_content: text_editor::Content::with_text(""),
+            lsp_hover_items: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             lsp_hover_visible: false,
             #[cfg(not(target_arch = "wasm32"))]
@@ -721,6 +720,11 @@ greet("World")
         if let EditorMessage::MouseHover(point) = event {
             self.handle_lsp_hover_from_mouse(editor_id, *point);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let EditorMessage::JumpClick(point) = event {
+            let editor = self.get_editor(editor_id);
+            editor.lsp_request_definition_at(*point);
+        }
         task
     }
 
@@ -731,10 +735,13 @@ greet("World")
     /// A batched `Task` containing tick updates for both editors.
     fn handle_tick(&mut self) -> Task<Message> {
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.drain_lsp_events();
+        let lsp_task = {
             self.process_lsp_hover_timers();
-        }
+            self.drain_lsp_events()
+        };
+        #[cfg(target_arch = "wasm32")]
+        let lsp_task = Task::none();
+
         let task_left = self
             .editor_left
             .update(&EditorMessage::Tick)
@@ -743,7 +750,7 @@ greet("World")
             .editor_right
             .update(&EditorMessage::Tick)
             .map(|e| Message::EditorEvent(EditorId::Right, e));
-        Task::batch([task_left, task_right])
+        Task::batch([lsp_task, task_left, task_right])
     }
 
     /// Handles loading a code template into a specific editor.
@@ -835,6 +842,61 @@ greet("World")
         self.editor_left.lose_focus();
         self.editor_right.lose_focus();
         Task::none()
+    }
+
+    fn handle_jump_to_file(
+        &mut self,
+        path: PathBuf,
+        line: usize,
+        col: usize,
+    ) -> Task<Message> {
+        let editor_id = self.active_editor;
+        let (editor, current_file) = self.get_active_editor_and_file();
+
+        if let Some(current) = current_file
+            && *current == path
+        {
+            return editor
+                .set_cursor(line, col)
+                .map(move |e| Message::EditorEvent(editor_id, e));
+        }
+
+        // Load file and then jump
+        Task::perform(file_ops::read_file(path), move |result| {
+            Message::FileOpenedAndJump(result.map(|(p, c)| (p, c, line, col)))
+        })
+    }
+
+    fn handle_file_opened_and_jump(
+        &mut self,
+        result: Result<(PathBuf, String, usize, usize), String>,
+    ) -> Task<Message> {
+        match result {
+            Ok((path, content, line, col)) => {
+                let editor_id = self.active_editor;
+                let (editor, current_file) = self.get_active_editor_and_file();
+                *current_file = Some(path.clone());
+                let t1 = editor
+                    .reset(&content)
+                    .map(move |e| Message::EditorEvent(editor_id, e));
+                let t2 = editor
+                    .set_cursor(line, col)
+                    .map(move |e| Message::EditorEvent(editor_id, e));
+                editor.mark_saved();
+                self.error_message = None;
+
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    self.sync_lsp_for_path(editor_id, &path);
+                }
+                Task::batch([t1, t2])
+            }
+            Err(err) => {
+                self.log("ERROR", &err);
+                self.error_message = Some(err);
+                Task::none()
+            }
+        }
     }
 
     /// Handles messages and updates the application state.
@@ -945,12 +1007,11 @@ greet("World")
                 self.handle_text_input_changed(value)
             }
             Message::TextInputClicked => self.handle_text_input_clicked(),
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspHoverContentAction(action) => {
-                self.lsp_hover_content.perform(action);
-                self.lsp_hover_interactive = true;
-                self.lsp_hover_hide_deadline = None;
-                Task::none()
+            Message::JumpToFile(path, line, col) => {
+                self.handle_jump_to_file(path, line, col)
+            }
+            Message::FileOpenedAndJump(result) => {
+                self.handle_file_opened_and_jump(result)
             }
             Message::LspHoverEntered => {
                 #[cfg(not(target_arch = "wasm32"))]
