@@ -150,6 +150,8 @@ pub(crate) enum LspEvent {
     Completion { items: Vec<String> },
     /// Definition location received
     Definition { uri: String, range: iced_code_editor::LspRange },
+    /// Progress notification received
+    Progress { token: String, server_key: String, title: String, message: Option<String>, percentage: Option<u32>, done: bool },
 }
 
 // =============================================================================
@@ -197,7 +199,7 @@ impl LspProcessClient {
 
         // Resolve the actual command to run
         let command = resolve_lsp_command(config)?;
-        Self::new_with_command(root_uri, events, &command)
+        Self::new_with_command(root_uri, events, &command, server_key)
     }
 
     /// Creates a new LSP client with a specific command.
@@ -206,6 +208,7 @@ impl LspProcessClient {
         root_uri: &str,
         events: mpsc::Sender<LspEvent>,
         command: &LspCommand,
+        server_key: &str,
     ) -> Result<Self, String> {
         // Spawn the LSP server process with piped stdin/stdout
         let mut child = Command::new(&command.program)
@@ -235,6 +238,7 @@ impl LspProcessClient {
         let pending_requests = Arc::new(Mutex::new(HashMap::new()));
         let pending_reader = pending_requests.clone();
         let events_reader = events;
+        let server_key = server_key.to_string();
 
         // Spawn the writer thread - sends messages to the LSP server
         let writer_thread = thread::spawn(move || {
@@ -290,44 +294,73 @@ impl LspProcessClient {
                 // Parse the JSON message and handle responses
                 if let Ok(value) =
                     serde_json::from_slice::<serde_json::Value>(&buf)
-                    && let Some(id) = value.get("id").and_then(|v| v.as_u64())
                 {
-                    // Look up the request type for this response
-                    let kind = {
-                        let mut pending = pending_reader
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        pending.remove(&id)
-                    };
+                    // Check if it's a response (has id and no method)
+                    if let Some(id) = value.get("id").and_then(|v| v.as_u64()) {
+                        if value.get("method").is_none() {
+                            // Look up the request type for this response
+                            let kind = {
+                                let mut pending = pending_reader
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner());
+                                pending.remove(&id)
+                            };
 
-                    if let Some(kind) = kind {
-                        let result = value
-                            .get("result")
-                            .unwrap_or(&serde_json::Value::Null);
-                        match kind {
-                            // Handle hover response
-                            LspRequestKind::Hover => {
-                                let text = parse_hover_text(result)
-                                    .unwrap_or_default();
-                                let _ = events_reader
-                                    .send(LspEvent::Hover { text });
-                            }
-                            // Handle completion response
-                            LspRequestKind::Completion => {
-                                let items = parse_completion_items(result);
-                                if !items.is_empty() {
-                                    let _ = events_reader
-                                        .send(LspEvent::Completion { items });
+                            if let Some(kind) = kind {
+                                let result = value
+                                    .get("result")
+                                    .unwrap_or(&serde_json::Value::Null);
+                                match kind {
+                                    // Handle hover response
+                                    LspRequestKind::Hover => {
+                                        let text = parse_hover_text(result)
+                                            .unwrap_or_default();
+                                        let _ = events_reader
+                                            .send(LspEvent::Hover { text });
+                                    }
+                                    // Handle completion response
+                                    LspRequestKind::Completion => {
+                                        let items = parse_completion_items(result);
+                                        if !items.is_empty() {
+                                            let _ = events_reader
+                                                .send(LspEvent::Completion { items });
+                                        }
+                                    }
+                                    // Handle definition response
+                                    LspRequestKind::Definition => {
+                                        if let Some((uri, range)) =
+                                            parse_definition_location(result)
+                                        {
+                                            let _ = events_reader.send(
+                                                LspEvent::Definition { uri, range },
+                                            );
+                                        }
+                                    }
                                 }
                             }
-                            // Handle definition response
-                            LspRequestKind::Definition => {
-                                if let Some((uri, range)) =
-                                    parse_definition_location(result)
-                                {
-                                    let _ = events_reader.send(
-                                        LspEvent::Definition { uri, range },
-                                    );
+                        }
+                    } else if let Some(method) = value.get("method").and_then(|m| m.as_str()) {
+                        // Notification from server
+                        if method == "$/progress" {
+                            if let Some(params) = value.get("params") {
+                                if let Some(token) = params.get("token").and_then(|t| t.as_str().map(String::from).or_else(|| t.as_i64().map(|i| i.to_string()))) {
+                                    if let Some(val) = params.get("value") {
+                                        let kind = val.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+                                        let title = val.get("title").and_then(|t| t.as_str()).map(String::from).unwrap_or_default();
+                                        let message = val.get("message").and_then(|m| m.as_str()).map(String::from);
+                                        let percentage = val.get("percentage").and_then(|p| p.as_u64()).map(|p| p as u32);
+                                        
+                                        let done = kind == "end";
+                                        
+                                        let _ = events_reader.send(LspEvent::Progress {
+                                            token,
+                                            server_key: server_key.clone(),
+                                            title,
+                                            message,
+                                            percentage,
+                                            done
+                                        });
+                                    }
                                 }
                             }
                         }

@@ -78,13 +78,10 @@ pub fn view_lsp_overlay(
                 + hover_padding * 2.0;
 
             // Get the editor and its viewport width based on which editor is active
-            let (editor, viewport_width) = match editor_id {
-                EditorId::Left => {
-                    (&app.editor_left, app.editor_left.viewport_width())
-                }
-                EditorId::Right => {
-                    (&app.editor_right, app.editor_right.viewport_width())
-                }
+            let (editor, viewport_width) = if let Some(tab) = app.tabs.iter().find(|t| t.id == editor_id) {
+                (&tab.editor, tab.editor.viewport_width())
+            } else {
+                 return container(Space::new().width(Length::Shrink).height(Length::Shrink)).into();
             };
 
             // Calculate content width, respecting viewport boundaries
@@ -202,20 +199,14 @@ pub fn view_lsp_overlay(
                 app.lsp_hover_position.unwrap_or(Point::new(4.0, 4.0));
 
             // Adjust position for viewport scrolling
-            let viewport_scroll = match editor_id {
-                EditorId::Left => app.editor_left.viewport_scroll(),
-                EditorId::Right => app.editor_right.viewport_scroll(),
-            };
+            let viewport_scroll = editor.viewport_scroll();
             let hover_pos = Point::new(
                 hover_pos.x,
                 (hover_pos.y - viewport_scroll).max(0.0),
             );
 
             // Get viewport dimensions for boundary checking
-            let viewport_height = match editor_id {
-                EditorId::Left => app.editor_left.viewport_height(),
-                EditorId::Right => app.editor_right.viewport_height(),
-            };
+            let viewport_height = editor.viewport_height();
 
             // Determine optimal position to avoid clipping
             let hover_total_height = scroll_height;

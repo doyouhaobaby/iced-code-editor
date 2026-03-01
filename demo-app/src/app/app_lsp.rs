@@ -1,5 +1,5 @@
 // Imports for LSP (Language Server Protocol) functionality
-use super::{DemoApp, EditorId, Template};
+use super::{DemoApp, EditorId, Template, LspProgress};
 use crate::app::Message;
 use crate::lsp_config::{
     LspLanguage, lsp_language_for_path, lsp_language_for_template,
@@ -26,11 +26,8 @@ pub(super) struct LspHoverPending {
 }
 
 /// Converts an EditorId to a string label for use in URIs
-fn editor_id_label(editor_id: EditorId) -> &'static str {
-    match editor_id {
-        EditorId::Left => "left",
-        EditorId::Right => "right",
-    }
+fn editor_id_label(editor_id: EditorId) -> String {
+    format!("editor_{}", editor_id.0)
 }
 
 /// Creates a virtual URI for a template file that doesn't exist on disk
@@ -57,10 +54,7 @@ impl DemoApp {
         &self,
         editor_id: EditorId,
     ) -> Option<&'static str> {
-        match editor_id {
-            EditorId::Left => self.lsp_server_left,
-            EditorId::Right => self.lsp_server_right,
-        }
+        self.tabs.iter().find(|t| t.id == editor_id)?.lsp_server_key
     }
 
     /// Sets the LSP server key for the specified editor
@@ -69,9 +63,8 @@ impl DemoApp {
         editor_id: EditorId,
         server: Option<&'static str>,
     ) {
-        match editor_id {
-            EditorId::Left => self.lsp_server_left = server,
-            EditorId::Right => self.lsp_server_right = server,
+        if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == editor_id) {
+            tab.lsp_server_key = server;
         }
     }
 
@@ -215,11 +208,10 @@ impl DemoApp {
         }
 
         // Find the text position at the mouse point
-        let anchor = match editor_id {
-            EditorId::Left => self.editor_left.lsp_hover_anchor_at_point(point),
-            EditorId::Right => {
-                self.editor_right.lsp_hover_anchor_at_point(point)
-            }
+        let anchor = if let Some(tab) = self.tabs.iter().find(|t| t.id == editor_id) {
+            tab.editor.lsp_hover_anchor_at_point(point)
+        } else {
+            None
         };
 
         let Some((position, anchor_point)) = anchor else {
@@ -271,17 +263,11 @@ impl DemoApp {
         if let Some(pending) = self.lsp_hover_pending.take() {
             if now >= pending.ready_at {
                 // Send hover request to the LSP server
-                let request_sent = match pending.editor_id {
-                    EditorId::Left => {
-                        self.editor_left.lsp_flush_pending_changes();
-                        self.editor_left
-                            .lsp_request_hover_at_position(pending.position)
-                    }
-                    EditorId::Right => {
-                        self.editor_right.lsp_flush_pending_changes();
-                        self.editor_right
-                            .lsp_request_hover_at_position(pending.position)
-                    }
+                let request_sent = if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == pending.editor_id) {
+                    tab.editor.lsp_flush_pending_changes();
+                    tab.editor.lsp_request_hover_at_position(pending.position)
+                } else {
+                    false
                 };
 
                 if request_sent {
@@ -348,7 +334,7 @@ impl DemoApp {
                             self.lsp_hover_hide_deadline = None;
                             if self.lsp_overlay_editor.is_none() {
                                 self.lsp_overlay_editor =
-                                    Some(self.active_editor);
+                                    Some(self.active_tab_id);
                             }
                         }
                     }
@@ -361,7 +347,7 @@ impl DemoApp {
                         if self.lsp_overlay_editor.is_none()
                             && self.lsp_completion_visible
                         {
-                            self.lsp_overlay_editor = Some(self.active_editor);
+                            self.lsp_overlay_editor = Some(self.active_tab_id);
                         }
                     }
                     // Handle definition response from LSP server
@@ -374,6 +360,33 @@ impl DemoApp {
                                 range.start.line as usize,
                                 range.start.character as usize,
                             ));
+                        }
+                    }
+                    // Handle progress notification from LSP server
+                    LspEvent::Progress {
+                        token,
+                        server_key,
+                        title,
+                        message,
+                        percentage,
+                        done,
+                    } => {
+                        if done {
+                            if let Some(map) = self.lsp_progress.get_mut(&server_key) {
+                                map.remove(&token);
+                                if map.is_empty() {
+                                    self.lsp_progress.remove(&server_key);
+                                }
+                            }
+                        } else {
+                            self.lsp_progress
+                                .entry(server_key)
+                                .or_default()
+                                .insert(token, LspProgress {
+                                    title,
+                                    message,
+                                    percentage,
+                                });
                         }
                     }
                 },
