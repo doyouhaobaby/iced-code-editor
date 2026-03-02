@@ -52,9 +52,17 @@ pub fn view(app: &DemoApp) -> Element<'_, Message> {
         }).collect::<Vec<_>>()
     ).spacing(2);
 
+    let tab_height = 38.0;
+    let tab_scrollbar_height = 12.0;
+    let tab_bar_height = if app.tabs_overflow {
+        tab_height + tab_scrollbar_height
+    } else {
+        tab_height
+    };
+
     let tab_bar = scrollable(tabs_list)
         .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new()))
-        .height(if app.tabs_overflow { 65 } else { 50 })
+        .height(tab_bar_height)
         .style(|theme: &Theme, _status| {
              let palette = theme.extended_palette();
              scrollable::Style {

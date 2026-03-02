@@ -1769,8 +1769,7 @@ mod tests {
                 .visual_lines_cache
                 .borrow()
                 .as_ref()
-                .map_or(true, |c| c.key.buffer_revision
-                    == editor.buffer_revision),
+                .is_none_or(|c| c.key.buffer_revision == editor.buffer_revision),
             "buffer edits should not leave stale data in the visual lines cache"
         );
     }
