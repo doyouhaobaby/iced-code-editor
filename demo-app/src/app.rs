@@ -2,15 +2,16 @@ use crate::file_ops;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::lsp_process_client::LspEvent;
 use crate::types::{EditorId, FontOption, LanguageOption, Template};
-use iced::widget::operation::focus;
 use iced::widget::Id;
+use iced::widget::operation::{focus, scroll_to};
+use iced::widget::scrollable;
 use iced::{Event, Point, Subscription, Task, Theme, event, mouse, window};
 #[cfg(not(target_arch = "wasm32"))]
 use iced_code_editor::LspPosition;
 use iced_code_editor::Message as EditorMessage;
 use iced_code_editor::{CodeEditor, Language, theme};
-use std::path::PathBuf;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc;
@@ -76,6 +77,10 @@ pub struct DemoApp {
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_last_completion: Vec<String>,
     #[cfg(not(target_arch = "wasm32"))]
+    lsp_all_completions: Vec<String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    lsp_completion_filter: String,
+    #[cfg(not(target_arch = "wasm32"))]
     pub lsp_hover_items: Vec<iced::widget::markdown::Item>,
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_hover_visible: bool,
@@ -83,6 +88,12 @@ pub struct DemoApp {
     pub lsp_completion_visible: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_completion_selected: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub lsp_completion_suppressed: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    lsp_applying_completion: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub lsp_completion_position: Option<Point>,
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_hover_position: Option<Point>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -169,6 +180,9 @@ pub enum Message {
     LspHoverExited,
     LspCompletionSelected(usize),
     LspCompletionClosed,
+    LspCompletionNavigateUp,
+    LspCompletionNavigateDown,
+    LspCompletionConfirm,
     JumpToFile(PathBuf, usize, usize),
     FileOpenedAndJump(Result<(PathBuf, String, usize, usize), String>),
 }
@@ -186,9 +200,7 @@ end
 greet("World")
 "#;
 
-        let log_messages = vec![
-            "[INFO] Application started".to_string(),
-        ];
+        let log_messages = vec!["[INFO] Application started".to_string()];
 
         let current_font = if cfg!(target_arch = "wasm32") {
             FontOption::JETBRAINS_MONO
@@ -199,7 +211,7 @@ greet("World")
         let mut editor = CodeEditor::new(default_content, "lua");
         let font = current_font.font();
         editor.set_font(font);
-        
+
         // Initial tab
         let tab_id = EditorId(0);
         let tab = EditorTab {
@@ -245,6 +257,10 @@ greet("World")
             #[cfg(not(target_arch = "wasm32"))]
             lsp_last_completion: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
+            lsp_all_completions: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            lsp_completion_filter: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             lsp_hover_items: Vec::new(),
             #[cfg(not(target_arch = "wasm32"))]
             lsp_hover_visible: false,
@@ -252,6 +268,12 @@ greet("World")
             lsp_completion_visible: false,
             #[cfg(not(target_arch = "wasm32"))]
             lsp_completion_selected: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            lsp_completion_suppressed: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            lsp_applying_completion: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            lsp_completion_position: None,
             #[cfg(not(target_arch = "wasm32"))]
             lsp_hover_position: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -343,9 +365,19 @@ greet("World")
         match result {
             Ok((path, content)) => {
                 // Check if file is already open
-                if let Some(tab) = self.tabs.iter().find(|t| t.file_path.as_ref() == Some(&path)) {
+                if let Some(tab) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.file_path.as_ref() == Some(&path))
+                {
                     self.active_tab_id = tab.id;
-                    self.log("INFO", &format!("Switched to existing tab for {}", path.display()));
+                    self.log(
+                        "INFO",
+                        &format!(
+                            "Switched to existing tab for {}",
+                            path.display()
+                        ),
+                    );
                     return Task::none();
                 }
 
@@ -354,7 +386,9 @@ greet("World")
                 let active_tab_id = self.active_tab_id;
                 let reuse_tab = {
                     let tab = self.get_active_tab().unwrap();
-                    tab.file_path.is_none() && tab.editor.content().trim().is_empty() && !tab.is_dirty
+                    tab.file_path.is_none()
+                        && tab.editor.content().trim().is_empty()
+                        && !tab.is_dirty
                 };
 
                 let target_tab_id = if reuse_tab {
@@ -362,13 +396,17 @@ greet("World")
                 } else {
                     let new_id = EditorId(self.next_tab_id);
                     self.next_tab_id += 1;
-                    
+
                     let mut editor = CodeEditor::new(&content, "lua"); // Default language, will update
                     let font = self.current_font.font();
                     editor.set_font(font);
-                    editor.set_font_size(self.current_font_size, self.auto_adjust_line_height);
+                    editor.set_font_size(
+                        self.current_font_size,
+                        self.auto_adjust_line_height,
+                    );
                     editor.set_line_height(self.current_line_height);
-                    editor.set_theme(theme::from_iced_theme(&self.current_theme));
+                    editor
+                        .set_theme(theme::from_iced_theme(&self.current_theme));
                     editor.set_language(self.current_language);
 
                     let tab = EditorTab {
@@ -394,14 +432,15 @@ greet("World")
                 );
 
                 let style = theme::from_iced_theme(&self.current_theme);
-                let (editor, current_file) = self.get_editor_and_file(target_tab_id);
+                let (editor, current_file) =
+                    self.get_editor_and_file(target_tab_id);
 
                 let task = editor.reset(&content);
                 editor.set_theme(style);
                 editor.mark_saved();
                 let path_for_lsp = path.clone();
                 *current_file = Some(path);
-                
+
                 // Update tab dirty state
                 if let Some(tab) = self.get_tab(target_tab_id) {
                     tab.is_dirty = false;
@@ -462,11 +501,11 @@ greet("World")
                 let (editor, current_file) = self.get_active_editor_and_file();
                 *current_file = Some(path);
                 editor.mark_saved();
-                
+
                 if let Some(tab) = self.get_active_tab() {
                     tab.is_dirty = false;
                 }
-                
+
                 self.error_message = None;
                 self.check_tabs_overflow();
             }
@@ -611,16 +650,73 @@ greet("World")
         editor_id: EditorId,
         event: &EditorMessage,
     ) -> Task<Message> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            // Intercept Escape to close completion menu
+            if matches!(event, EditorMessage::CloseSearch)
+                && self.lsp_completion_visible
+            {
+                self.lsp_all_completions.clear();
+                self.lsp_last_completion.clear();
+                self.lsp_completion_filter.clear();
+                self.lsp_completion_visible = false;
+                self.lsp_completion_suppressed = false;
+                if !self.lsp_hover_visible {
+                    self.lsp_overlay_editor = None;
+                }
+                return Task::none();
+            }
+
+            // Intercept keyboard events when completion menu is visible and should show
+            if self.lsp_completion_visible
+                && !self.lsp_completion_suppressed
+                && !self.lsp_last_completion.is_empty()
+            {
+                match event {
+                    EditorMessage::ArrowKey(direction, false) => {
+                        use iced_code_editor::ArrowDirection;
+                        match direction {
+                            ArrowDirection::Up => {
+                                return Task::done(
+                                    Message::LspCompletionNavigateUp,
+                                );
+                            }
+                            ArrowDirection::Down => {
+                                return Task::done(
+                                    Message::LspCompletionNavigateDown,
+                                );
+                            }
+                            ArrowDirection::Left | ArrowDirection::Right => {
+                                // Clear completion when navigating left/right away from word
+                                self.lsp_all_completions.clear();
+                                self.lsp_last_completion.clear();
+                                self.lsp_completion_filter.clear();
+                                self.lsp_completion_visible = false;
+                                self.lsp_completion_suppressed = false;
+                                if !self.lsp_hover_visible {
+                                    self.lsp_overlay_editor = None;
+                                }
+                            }
+                        }
+                    }
+                    EditorMessage::Enter => {
+                        return Task::done(Message::LspCompletionConfirm);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         let task = {
             let tab = self.get_tab(editor_id).unwrap();
             let task = tab
                 .editor
                 .update(event)
                 .map(move |e| Message::EditorEvent(editor_id, e));
-            
+
             tab.is_dirty = tab.editor.is_modified();
             // Check overflow if dirty state changed (adds/removes '*')
-            // We can't easily know if it changed here without checking previous state, 
+            // We can't easily know if it changed here without checking previous state,
             // but is_dirty is cheap to check.
             // For now, let's call it. It's not too expensive.
             self.check_tabs_overflow();
@@ -634,6 +730,43 @@ greet("World")
         if let EditorMessage::JumpClick(point) = event {
             let editor = self.get_editor(editor_id);
             editor.lsp_request_definition_at(*point);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let EditorMessage::CharacterInput(ch) = event {
+            if !self.lsp_applying_completion {
+                // If input is not a word character, clear completion state
+                if !ch.is_alphanumeric() && *ch != '_' {
+                    self.lsp_all_completions.clear();
+                    self.lsp_last_completion.clear();
+                    self.lsp_completion_filter.clear();
+                    self.lsp_completion_visible = false;
+                    self.lsp_completion_suppressed = false;
+                    if !self.lsp_hover_visible {
+                        self.lsp_overlay_editor = None;
+                    }
+                } else {
+                    self.lsp_completion_suppressed = false;
+                    if !self.lsp_all_completions.is_empty() {
+                        if let Some(tab) =
+                            self.tabs.iter().find(|t| t.id == editor_id)
+                        {
+                            let content = tab.editor.content();
+                            let (line, col) = tab.editor.cursor_position();
+                            if let Some(line_content) =
+                                content.lines().nth(line)
+                            {
+                                let word_start =
+                                    Self::find_word_start(line_content, col);
+                                let current_word =
+                                    &line_content[word_start..col];
+                                self.lsp_completion_filter =
+                                    current_word.to_string();
+                                self.filter_completions();
+                            }
+                        }
+                    }
+                }
+            }
         }
         task
     }
@@ -685,7 +818,7 @@ greet("World")
         let task = editor.reset(template.content());
         editor.set_theme(style);
         *current_file = None;
-        
+
         if let Some(tab) = self.get_tab(editor_id) {
             tab.is_dirty = false;
         }
@@ -736,7 +869,9 @@ greet("World")
         col: usize,
     ) -> Task<Message> {
         // Check if file is already open
-        if let Some(tab) = self.tabs.iter().find(|t| t.file_path.as_ref() == Some(&path)) {
+        if let Some(tab) =
+            self.tabs.iter().find(|t| t.file_path.as_ref() == Some(&path))
+        {
             let editor_id = tab.id;
             self.active_tab_id = editor_id;
             let editor = &mut self.get_tab(editor_id).unwrap().editor;
@@ -757,8 +892,12 @@ greet("World")
     ) -> Task<Message> {
         match result {
             Ok((path, content, line, col)) => {
-                 // Check if file is already open (double check)
-                if let Some(tab) = self.tabs.iter().find(|t| t.file_path.as_ref() == Some(&path)) {
+                // Check if file is already open (double check)
+                if let Some(tab) = self
+                    .tabs
+                    .iter()
+                    .find(|t| t.file_path.as_ref() == Some(&path))
+                {
                     let editor_id = tab.id;
                     self.active_tab_id = editor_id;
                     let editor = &mut self.get_tab(editor_id).unwrap().editor;
@@ -771,7 +910,9 @@ greet("World")
                 let active_tab_id = self.active_tab_id;
                 let reuse_tab = {
                     let tab = self.get_active_tab().unwrap();
-                    tab.file_path.is_none() && tab.editor.content().trim().is_empty() && !tab.is_dirty
+                    tab.file_path.is_none()
+                        && tab.editor.content().trim().is_empty()
+                        && !tab.is_dirty
                 };
 
                 let target_tab_id = if reuse_tab {
@@ -779,13 +920,17 @@ greet("World")
                 } else {
                     let new_id = EditorId(self.next_tab_id);
                     self.next_tab_id += 1;
-                    
+
                     let mut editor = CodeEditor::new(&content, "lua");
                     let font = self.current_font.font();
                     editor.set_font(font);
-                    editor.set_font_size(self.current_font_size, self.auto_adjust_line_height);
+                    editor.set_font_size(
+                        self.current_font_size,
+                        self.auto_adjust_line_height,
+                    );
                     editor.set_line_height(self.current_line_height);
-                    editor.set_theme(theme::from_iced_theme(&self.current_theme));
+                    editor
+                        .set_theme(theme::from_iced_theme(&self.current_theme));
                     editor.set_language(self.current_language);
 
                     let tab = EditorTab {
@@ -801,7 +946,8 @@ greet("World")
                     new_id
                 };
 
-                let (editor, current_file) = self.get_editor_and_file(target_tab_id);
+                let (editor, current_file) =
+                    self.get_editor_and_file(target_tab_id);
                 *current_file = Some(path.clone());
                 let t1 = editor
                     .reset(&content)
@@ -829,27 +975,33 @@ greet("World")
 
     /// Checks if the total width of tabs overflows the window width
     pub fn check_tabs_overflow(&mut self) {
-        let total_tabs_width: f32 = self.tabs.iter().map(|tab| {
-            let name = tab.file_path.as_ref()
-                .and_then(|p| p.file_name())
-                .and_then(|n| n.to_str())
-                .unwrap_or("Untitled");
-            let modified = if tab.is_dirty { "*" } else { "" };
-            let label = format!("{}{}", name, modified);
-            
-            // Approximate width:
-            // - Padding: 10 * 2 = 20
-            // - Close button: 20
-            // - Spacing inside tab: 5
-            // - Text: len * 9 (approximate char width for size 14)
-            // - Extra space for indicator/border: 2
-            let text_width = label.len() as f32 * 9.0;
-            text_width + 45.0
-        }).sum();
-        
+        let total_tabs_width: f32 = self
+            .tabs
+            .iter()
+            .map(|tab| {
+                let name = tab
+                    .file_path
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("Untitled");
+                let modified = if tab.is_dirty { "*" } else { "" };
+                let label = format!("{}{}", name, modified);
+
+                // Approximate width:
+                // - Padding: 10 * 2 = 20
+                // - Close button: 20
+                // - Spacing inside tab: 5
+                // - Text: len * 9 (approximate char width for size 14)
+                // - Extra space for indicator/border: 2
+                let text_width = label.len() as f32 * 9.0;
+                text_width + 45.0
+            })
+            .sum();
+
         let spacing_width = (self.tabs.len().saturating_sub(1) as f32) * 2.0;
         let total_width = total_tabs_width + spacing_width + 20.0; // +20 padding
-        
+
         self.tabs_overflow = total_width > self.window_width;
     }
 
@@ -941,6 +1093,29 @@ greet("World")
                         self.lsp_hover_hide_deadline =
                             Some(Instant::now() + Duration::from_millis(400));
                     }
+
+                    // Handle Escape key to close completion
+                    if let Event::Keyboard(
+                        iced::keyboard::Event::KeyPressed {
+                            key:
+                                iced::keyboard::Key::Named(
+                                    iced::keyboard::key::Named::Escape,
+                                ),
+                            ..
+                        },
+                    ) = &event
+                    {
+                        if self.lsp_completion_visible {
+                            self.lsp_all_completions.clear();
+                            self.lsp_last_completion.clear();
+                            self.lsp_completion_filter.clear();
+                            self.lsp_completion_visible = false;
+                            self.lsp_completion_suppressed = false;
+                            if !self.lsp_hover_visible {
+                                self.lsp_overlay_editor = None;
+                            }
+                        }
+                    }
                 }
                 Task::none()
             }
@@ -984,6 +1159,7 @@ greet("World")
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.lsp_completion_visible = false;
+                    self.lsp_completion_suppressed = false;
                     if !self.lsp_hover_visible {
                         self.lsp_overlay_editor = None;
                     }
@@ -993,12 +1169,77 @@ greet("World")
             Message::LspCompletionSelected(index) => {
                 #[cfg(not(target_arch = "wasm32"))]
                 {
+                    self.lsp_applying_completion = true;
                     if let Some(item) = self.lsp_last_completion.get(index) {
-                        self.log("INFO", &format!("LSP completion: {}", item));
+                        self.apply_completion(item.clone());
                     }
+                    self.lsp_applying_completion = false;
                     self.lsp_completion_visible = false;
+                    self.lsp_completion_suppressed = true;
                     if !self.lsp_hover_visible {
                         self.lsp_overlay_editor = None;
+                    }
+                }
+                Task::none()
+            }
+            Message::LspCompletionNavigateUp => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if self.lsp_completion_visible
+                        && !self.lsp_last_completion.is_empty()
+                    {
+                        if self.lsp_completion_selected > 0 {
+                            self.lsp_completion_selected -= 1;
+                        } else {
+                            self.lsp_completion_selected =
+                                self.lsp_last_completion.len() - 1;
+                        }
+                        let selected = self.lsp_completion_selected;
+                        let scroll_y = selected as f32 * 20.0;
+                        return scroll_to(
+                            Id::new("completion_scrollable"),
+                            scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+                        );
+                    }
+                }
+                Task::none()
+            }
+            Message::LspCompletionNavigateDown => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if self.lsp_completion_visible
+                        && !self.lsp_last_completion.is_empty()
+                    {
+                        self.lsp_completion_selected =
+                            (self.lsp_completion_selected + 1)
+                                % self.lsp_last_completion.len();
+                        let selected = self.lsp_completion_selected;
+                        let scroll_y = selected as f32 * 20.0;
+                        return scroll_to(
+                            Id::new("completion_scrollable"),
+                            scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+                        );
+                    }
+                }
+                Task::none()
+            }
+            Message::LspCompletionConfirm => {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if self.lsp_completion_visible {
+                        let selected = self.lsp_completion_selected;
+                        self.lsp_applying_completion = true;
+                        if let Some(item) =
+                            self.lsp_last_completion.get(selected).cloned()
+                        {
+                            self.apply_completion(item);
+                        }
+                        self.lsp_applying_completion = false;
+                        self.lsp_completion_visible = false;
+                        self.lsp_completion_suppressed = true;
+                        if !self.lsp_hover_visible {
+                            self.lsp_overlay_editor = None;
+                        }
                     }
                 }
                 Task::none()
@@ -1006,7 +1247,9 @@ greet("World")
             // Tab management
             Message::CloseTab(id) => {
                 if self.tabs.len() > 1 {
-                    if let Some(index) = self.tabs.iter().position(|t| t.id == id) {
+                    if let Some(index) =
+                        self.tabs.iter().position(|t| t.id == id)
+                    {
                         self.tabs.remove(index);
                         if self.active_tab_id == id {
                             // Select the last tab or the one before the removed one
@@ -1024,10 +1267,10 @@ greet("World")
                     // Or close app? User said "can close file".
                     // If it's the last tab, maybe just reset it to empty?
                     if let Some(tab) = self.tabs.first_mut() {
-                         let default_content = "";
-                         let _ = tab.editor.reset(default_content);
-                         tab.file_path = None;
-                         tab.is_dirty = false;
+                        let default_content = "";
+                        let _ = tab.editor.reset(default_content);
+                        tab.file_path = None;
+                        tab.is_dirty = false;
                     }
                     self.check_tabs_overflow();
                 }
@@ -1038,29 +1281,32 @@ greet("World")
                 Task::none()
             }
             Message::NewTab => {
-                 let new_id = EditorId(self.next_tab_id);
-                 self.next_tab_id += 1;
-                 
-                 let mut editor = CodeEditor::new("", "lua");
-                 let font = self.current_font.font();
-                 editor.set_font(font);
-                 editor.set_font_size(self.current_font_size, self.auto_adjust_line_height);
-                 editor.set_line_height(self.current_line_height);
-                 editor.set_theme(theme::from_iced_theme(&self.current_theme));
-                 editor.set_language(self.current_language);
+                let new_id = EditorId(self.next_tab_id);
+                self.next_tab_id += 1;
 
-                 let tab = EditorTab {
-                     id: new_id,
-                     editor,
-                     file_path: None,
-                     is_dirty: false,
-                     #[cfg(not(target_arch = "wasm32"))]
-                     lsp_server_key: None,
-                 };
-                 self.tabs.push(tab);
-                 self.active_tab_id = new_id;
-                 self.check_tabs_overflow();
-                 Task::none()
+                let mut editor = CodeEditor::new("", "lua");
+                let font = self.current_font.font();
+                editor.set_font(font);
+                editor.set_font_size(
+                    self.current_font_size,
+                    self.auto_adjust_line_height,
+                );
+                editor.set_line_height(self.current_line_height);
+                editor.set_theme(theme::from_iced_theme(&self.current_theme));
+                editor.set_language(self.current_language);
+
+                let tab = EditorTab {
+                    id: new_id,
+                    editor,
+                    file_path: None,
+                    is_dirty: false,
+                    #[cfg(not(target_arch = "wasm32"))]
+                    lsp_server_key: None,
+                };
+                self.tabs.push(tab);
+                self.active_tab_id = new_id;
+                self.check_tabs_overflow();
+                Task::none()
             }
         }
     }

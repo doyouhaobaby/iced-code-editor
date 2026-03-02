@@ -6,8 +6,8 @@
 use crate::app::{DemoApp, Message};
 use crate::types::EditorId;
 use iced::widget::{
-    Space, button, column, container, markdown, mouse_area, row, scrollable,
-    stack, text,
+    Id, Space, button, column, container, markdown, mouse_area, row,
+    scrollable, stack, text,
 };
 use iced::{Background, Border, Color, Element, Length, Point, Shadow, Theme};
 use iced_code_editor::CodeEditor;
@@ -78,10 +78,15 @@ pub fn view_lsp_overlay(
                 + hover_padding * 2.0;
 
             // Get the editor and its viewport width based on which editor is active
-            let (editor, viewport_width) = if let Some(tab) = app.tabs.iter().find(|t| t.id == editor_id) {
+            let (editor, viewport_width) = if let Some(tab) =
+                app.tabs.iter().find(|t| t.id == editor_id)
+            {
                 (&tab.editor, tab.editor.viewport_width())
             } else {
-                 return container(Space::new().width(Length::Shrink).height(Length::Shrink)).into();
+                return container(
+                    Space::new().width(Length::Shrink).height(Length::Shrink),
+                )
+                .into();
             };
 
             // Calculate content width, respecting viewport boundaries
@@ -267,73 +272,188 @@ pub fn view_lsp_overlay(
     // Build the auto-completion menu layer
     let completion_layer: Element<'_, Message> = if app.lsp_completion_visible
         && !app.lsp_last_completion.is_empty()
+        && !app.lsp_completion_suppressed
     {
+        // Limit the number of visible items to prevent oversized menus
+        let max_visible_items = 8;
+        let visible_count =
+            app.lsp_last_completion.len().min(max_visible_items);
+        let item_height = 20.0; // Approximate height per item
+        let header_height = 24.0;
+        let padding = 4.0;
+        let menu_height = header_height
+            + (visible_count as f32 * item_height)
+            + (padding * 2.0);
+
+        // Get cursor position from completion_position or use default
+        let cursor_pos =
+            app.lsp_completion_position.unwrap_or(Point::new(4.0, 4.0));
+        let line_height = app.current_line_height;
+
+        // Get editor viewport info
+        let (viewport_width, viewport_height, viewport_scroll) =
+            if let Some(tab) = app.tabs.iter().find(|t| t.id == editor_id) {
+                (
+                    tab.editor.viewport_width(),
+                    tab.editor.viewport_height(),
+                    tab.editor.viewport_scroll(),
+                )
+            } else {
+                return container(
+                    Space::new().width(Length::Shrink).height(Length::Shrink),
+                )
+                .into();
+            };
+
+        // Calculate menu width (limited)
+        let menu_width = 250.0_f32.min(viewport_width - 8.0);
+
+        // Adjust position for viewport scrolling
+        let adjusted_y = (cursor_pos.y - viewport_scroll).max(0.0);
+
+        // Determine if menu should appear above or below cursor
+        let space_below = viewport_height - adjusted_y - line_height;
+        let show_above =
+            space_below < menu_height + 4.0 && adjusted_y >= menu_height + 4.0;
+
+        // Calculate position
+        let offset_x =
+            cursor_pos.x.min(viewport_width - menu_width - 4.0).max(4.0);
+        let offset_y = if show_above {
+            (adjusted_y - menu_height - 4.0).max(0.0)
+        } else {
+            adjusted_y + line_height + 4.0
+        };
+
         let mut completion_items: Vec<Element<'_, Message>> = Vec::new();
 
-        // Create header with title and close button
-        let header = row![
-            text("Completion").size(12),
-            Space::new().width(Length::Fill),
-            button(text("×").size(12))
-                .on_press(Message::LspCompletionClosed)
-                .padding(2)
-        ]
-        .align_y(iced::Center);
-        completion_items.push(header.into());
-
-        // Render each completion item
+        // Render each completion item as a clickable button
         for (index, item) in app.lsp_last_completion.iter().enumerate() {
-            // Highlight the currently selected item with a marker
-            let label = if index == app.lsp_completion_selected {
-                format!("› {}", item)
-            } else {
-                item.clone()
-            };
+            let is_selected = index == app.lsp_completion_selected;
+
             completion_items.push(
-                button(text(label).size(12).line_height(
+                button(text(item.clone()).size(12).line_height(
                     iced::widget::text::LineHeight::Relative(1.5),
                 ))
+                .padding([2, 8])
+                .width(Length::Fill)
                 .on_press(Message::LspCompletionSelected(index))
-                .padding(4)
+                .style(move |theme: &Theme, _status| {
+                    let palette = theme.extended_palette();
+                    if is_selected {
+                        button::Style {
+                            background: Some(iced::Background::Color(
+                                palette.primary.weak.color,
+                            )),
+                            text_color: Color::WHITE,
+                            ..Default::default()
+                        }
+                    } else {
+                        button::Style {
+                            background: Some(iced::Background::Color(
+                                palette.background.weak.color,
+                            )),
+                            text_color: Color::WHITE,
+                            ..Default::default()
+                        }
+                    }
+                })
                 .into(),
             );
         }
 
-        // Wrap completion items in a styled container
-        // Wrap completion items in a styled container
-        let completion_box = container(column(completion_items).spacing(2))
-            .padding(8)
-            // Apply theme-aware styling
-            .style(|theme: &Theme| {
+        // Wrap completion items in a styled, scrollable container
+        let completion_box = scrollable(column(completion_items).spacing(0))
+            .height(Length::Fixed(menu_height))
+            .width(Length::Fixed(menu_width))
+            .id(Id::new("completion_scrollable"))
+            .style(|theme: &Theme, _status| {
                 let palette = theme.extended_palette();
-                container::Style {
-                    background: Some(iced::Background::Color(
-                        palette.background.weak.color,
-                    )),
-                    border: iced::Border {
-                        color: palette.primary.weak.color,
-                        width: 1.0,
-                        radius: 6.0.into(),
+                scrollable::Style {
+                    container: container::Style {
+                        background: Some(iced::Background::Color(
+                            palette.background.weak.color,
+                        )),
+                        border: iced::Border {
+                            color: palette.primary.weak.color,
+                            width: 1.0,
+                            radius: 4.0.into(),
+                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
+                    vertical_rail: scrollable::Rail {
+                        background: Some(palette.background.weak.color.into()),
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            width: 0.0,
+                            color: iced::Color::TRANSPARENT,
+                        },
+                        scroller: scrollable::Scroller {
+                            background: palette.primary.weak.color.into(),
+                            border: iced::Border {
+                                radius: 4.0.into(),
+                                width: 0.0,
+                                color: iced::Color::TRANSPARENT,
+                            },
+                        },
+                    },
+                    horizontal_rail: scrollable::Rail {
+                        background: Some(palette.background.weak.color.into()),
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            width: 0.0,
+                            color: iced::Color::TRANSPARENT,
+                        },
+                        scroller: scrollable::Scroller {
+                            background: palette.primary.weak.color.into(),
+                            border: iced::Border {
+                                radius: 4.0.into(),
+                                width: 0.0,
+                                color: iced::Color::TRANSPARENT,
+                            },
+                        },
+                    },
+                    gap: None,
+                    auto_scroll: scrollable::AutoScroll {
+                        background: iced::Color::TRANSPARENT.into(),
+                        border: iced::Border::default(),
+                        shadow: iced::Shadow::default(),
+                        icon: iced::Color::TRANSPARENT,
+                    },
                 }
             });
 
         has_overlay = true;
 
-        // Position the completion menu in the top-left corner with padding
-        container(
+        // Create an invisible overlay to capture clicks outside the completion box
+        let click_outside =
+            button(Space::new().width(Length::Fill).height(Length::Fill))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .on_press(Message::LspCompletionClosed)
+                .style(|_theme: &Theme, _status| button::Style {
+                    background: Some(Background::Color(Color::TRANSPARENT)),
+                    ..Default::default()
+                });
+
+        // Position the completion menu at cursor position
+        let completion_content = container(
             column![
-                Space::new().height(Length::Fixed(12.0)),
-                row![Space::new().width(Length::Fixed(12.0)), completion_box]
+                Space::new().height(Length::Fixed(offset_y)),
+                row![
+                    Space::new().width(Length::Fixed(offset_x)),
+                    completion_box
+                ]
             ]
             .spacing(0)
             .width(Length::Fill)
             .height(Length::Fill),
         )
         .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        .height(Length::Fill);
+
+        // Stack click-outside handler below completion box so clicks on completion still work
+        stack![click_outside, completion_content].into()
     } else {
         container(Space::new().width(Length::Shrink).height(Length::Shrink))
             .into()

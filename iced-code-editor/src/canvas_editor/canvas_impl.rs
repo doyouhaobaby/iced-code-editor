@@ -1815,7 +1815,8 @@ mod tests {
             content, 0, 2, 3, 0.0, FONT_SIZE, CHAR_WIDTH,
         );
         let expected_x_tab = CHAR_WIDTH + FONT_SIZE; // 'A' + '👋'
-        let expected_w_tab = CHAR_WIDTH * crate::canvas_editor::TAB_WIDTH as f32;
+        let expected_w_tab =
+            CHAR_WIDTH * crate::canvas_editor::TAB_WIDTH as f32;
 
         assert_eq!(
             compare_floats(x_tab, expected_x_tab),

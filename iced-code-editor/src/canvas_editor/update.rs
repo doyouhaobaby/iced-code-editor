@@ -123,6 +123,13 @@ impl CodeEditor {
         self.history.push(Box::new(cmd));
 
         self.finish_edit_operation();
+
+        // Auto-trigger LSP completion for identifier characters and trigger characters
+        if ch.is_alphanumeric() || ch == '_' || ch == '.' {
+            self.lsp_flush_pending_changes();
+            self.lsp_request_completion();
+        }
+
         self.scroll_to_cursor()
     }
 

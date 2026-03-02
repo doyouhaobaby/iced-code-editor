@@ -1,5 +1,5 @@
 // Imports for LSP (Language Server Protocol) functionality
-use super::{DemoApp, EditorId, Template, LspProgress};
+use super::{DemoApp, EditorId, LspProgress, Template};
 use crate::app::Message;
 use crate::lsp_config::{
     LspLanguage, lsp_language_for_path, lsp_language_for_template,
@@ -7,7 +7,7 @@ use crate::lsp_config::{
 use crate::lsp_process_client::{LspEvent, LspProcessClient};
 use iced::Point;
 use iced::Task;
-use iced_code_editor::{LspDocument, LspPosition};
+use iced_code_editor::{LspDocument, LspPosition, Message as EditorMessage};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -49,6 +49,77 @@ fn path_to_file_uri(path: &Path) -> String {
 }
 
 impl DemoApp {
+    /// Applies a completion item by inserting the text at the current cursor position
+    /// and replacing the current word being typed
+    pub(super) fn apply_completion(&mut self, completion_text: String) {
+        if let Some(tab) =
+            self.tabs.iter_mut().find(|t| t.id == self.active_tab_id)
+        {
+            let content = tab.editor.content();
+            let (line, col) = tab.editor.cursor_position();
+
+            // Find the start of the current word
+            let line_content = content.lines().nth(line).unwrap_or("");
+            let word_start_col = Self::find_word_start(line_content, col);
+
+            // Calculate how many characters to delete
+            let chars_to_delete = col - word_start_col;
+
+            // Delete the current word being typed and insert the completion
+            for _ in 0..chars_to_delete {
+                let _ = tab.editor.update(&EditorMessage::Backspace);
+            }
+
+            // Insert the completion text character by character
+            for ch in completion_text.chars() {
+                let _ = tab.editor.update(&EditorMessage::CharacterInput(ch));
+            }
+
+            tab.is_dirty = tab.editor.is_modified();
+            self.log(
+                "INFO",
+                &format!("Applied completion: {}", completion_text),
+            );
+        }
+    }
+
+    /// Filters the completion list based on the current input
+    pub(super) fn filter_completions(&mut self) {
+        let filter = self.lsp_completion_filter.to_lowercase();
+        if filter.is_empty() {
+            self.lsp_last_completion = self.lsp_all_completions.clone();
+        } else {
+            self.lsp_last_completion = self
+                .lsp_all_completions
+                .iter()
+                .filter(|item| item.to_lowercase().contains(&filter))
+                .cloned()
+                .collect();
+        }
+        self.lsp_completion_visible = !self.lsp_last_completion.is_empty();
+        if self.lsp_completion_selected >= self.lsp_last_completion.len() {
+            self.lsp_completion_selected =
+                self.lsp_last_completion.len().saturating_sub(1);
+        }
+    }
+
+    /// Finds the start column of the current word being typed
+    pub(super) fn find_word_start(line: &str, cursor_col: usize) -> usize {
+        let chars: Vec<char> = line.chars().collect();
+        let mut word_start = cursor_col;
+
+        // Move backwards to find the start of the word
+        while word_start > 0 {
+            let ch = chars.get(word_start - 1).copied().unwrap_or(' ');
+            if !ch.is_alphanumeric() && ch != '_' {
+                break;
+            }
+            word_start -= 1;
+        }
+
+        word_start
+    }
+
     /// Gets the LSP server key for the specified editor
     pub(super) fn lsp_server_for_editor(
         &self,
@@ -208,11 +279,12 @@ impl DemoApp {
         }
 
         // Find the text position at the mouse point
-        let anchor = if let Some(tab) = self.tabs.iter().find(|t| t.id == editor_id) {
-            tab.editor.lsp_hover_anchor_at_point(point)
-        } else {
-            None
-        };
+        let anchor =
+            if let Some(tab) = self.tabs.iter().find(|t| t.id == editor_id) {
+                tab.editor.lsp_hover_anchor_at_point(point)
+            } else {
+                None
+            };
 
         let Some((position, anchor_point)) = anchor else {
             // No valid anchor point - schedule hide if hover is visible
@@ -263,7 +335,9 @@ impl DemoApp {
         if let Some(pending) = self.lsp_hover_pending.take() {
             if now >= pending.ready_at {
                 // Send hover request to the LSP server
-                let request_sent = if let Some(tab) = self.tabs.iter_mut().find(|t| t.id == pending.editor_id) {
+                let request_sent = if let Some(tab) =
+                    self.tabs.iter_mut().find(|t| t.id == pending.editor_id)
+                {
                     tab.editor.lsp_flush_pending_changes();
                     tab.editor.lsp_request_hover_at_position(pending.position)
                 } else {
@@ -340,10 +414,20 @@ impl DemoApp {
                     }
                     // Handle completion response from LSP server
                     LspEvent::Completion { items } => {
-                        self.lsp_last_completion = items;
-                        self.lsp_completion_visible =
-                            !self.lsp_last_completion.is_empty();
+                        self.lsp_all_completions = items.clone();
                         self.lsp_completion_selected = 0;
+                        self.filter_completions();
+
+                        // Record cursor position for menu placement
+                        if let Some(tab) = self
+                            .tabs
+                            .iter()
+                            .find(|t| t.id == self.active_tab_id)
+                        {
+                            self.lsp_completion_position =
+                                tab.editor.cursor_screen_position();
+                        }
+
                         if self.lsp_overlay_editor.is_none()
                             && self.lsp_completion_visible
                         {
@@ -372,7 +456,9 @@ impl DemoApp {
                         done,
                     } => {
                         if done {
-                            if let Some(map) = self.lsp_progress.get_mut(&server_key) {
+                            if let Some(map) =
+                                self.lsp_progress.get_mut(&server_key)
+                            {
                                 map.remove(&token);
                                 if map.is_empty() {
                                     self.lsp_progress.remove(&server_key);
@@ -382,11 +468,10 @@ impl DemoApp {
                             self.lsp_progress
                                 .entry(server_key)
                                 .or_default()
-                                .insert(token, LspProgress {
-                                    title,
-                                    message,
-                                    percentage,
-                                });
+                                .insert(
+                                    token,
+                                    LspProgress { title, message, percentage },
+                                );
                         }
                     }
                     LspEvent::Log { server_key, message } => {

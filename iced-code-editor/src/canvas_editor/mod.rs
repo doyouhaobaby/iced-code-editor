@@ -1374,6 +1374,53 @@ impl CodeEditor {
         self.focus_locked = false;
     }
 
+    /// Returns the screen position of the cursor.
+    ///
+    /// This method returns the (x, y) coordinates of the current cursor position
+    /// relative to the editor canvas, accounting for gutter width and line height.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<iced::Point>` containing the cursor position, or `None` if
+    /// the cursor position cannot be determined.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs");
+    /// if let Some(point) = editor.cursor_screen_position() {
+    ///     println!("Cursor at: ({}, {})", point.x, point.y);
+    /// }
+    /// ```
+    pub fn cursor_screen_position(&self) -> Option<iced::Point> {
+        let (line, col) = self.cursor;
+        self.point_from_position(line, col)
+    }
+
+    /// Returns the current cursor position as (line, column).
+    ///
+    /// This method returns the logical cursor position in the buffer,
+    /// where line and column are both 0-indexed.
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(line, column)` representing the cursor position.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs");
+    /// let (line, col) = editor.cursor_position();
+    /// println!("Cursor at line {}, column {}", line, col);
+    /// ```
+    pub fn cursor_position(&self) -> (usize, usize) {
+        self.cursor
+    }
+
     /// Returns the maximum content width across all lines, in pixels.
     ///
     /// Used to size the horizontal scrollbar when `wrap_enabled = false`.
