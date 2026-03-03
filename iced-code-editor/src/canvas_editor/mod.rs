@@ -1219,6 +1219,39 @@ impl CodeEditor {
         self.search_replace_enabled
     }
 
+    /// Opens the search dialog programmatically.
+    ///
+    /// This is useful when wiring your own UI button instead of relying on
+    /// keyboard shortcuts.
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` that focuses the search input.
+    pub fn open_search_dialog(&mut self) -> iced::Task<Message> {
+        self.update(&Message::OpenSearch)
+    }
+
+    /// Opens the search-and-replace dialog programmatically.
+    ///
+    /// This is useful when wiring your own UI button instead of relying on
+    /// keyboard shortcuts.
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` that focuses the search input.
+    pub fn open_search_replace_dialog(&mut self) -> iced::Task<Message> {
+        self.update(&Message::OpenSearchReplace)
+    }
+
+    /// Closes the search dialog programmatically.
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` for any follow-up UI work.
+    pub fn close_search_dialog(&mut self) -> iced::Task<Message> {
+        self.update(&Message::CloseSearch)
+    }
+
     /// Sets the line wrapping with builder pattern.
     ///
     /// # Arguments
