@@ -1171,14 +1171,12 @@ greet("World")
             Message::FileOpenedAndJump(result) => {
                 self.handle_file_opened_and_jump(result)
             }
+            #[cfg(not(target_arch = "wasm32"))]
             Message::LspHoverEntered => {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    self.lsp_hover_interactive = true;
-                    self.lsp_hover_hide_deadline = None;
-                    for tab in &mut self.tabs {
-                        tab.editor.lose_focus();
-                    }
+                self.lsp_hover_interactive = true;
+                self.lsp_hover_hide_deadline = None;
+                for tab in &mut self.tabs {
+                    tab.editor.lose_focus();
                 }
                 focus(Id::new("lsp_hover_text_editor"))
             }
