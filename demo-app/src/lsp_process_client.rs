@@ -395,53 +395,44 @@ impl LspProcessClient {
                         value.get("method").and_then(|m| m.as_str())
                     {
                         // Notification from server
-                        if method == "$/progress" {
-                            if let Some(params) = value.get("params") {
-                                if let Some(token) =
-                                    params.get("token").and_then(|t| {
-                                        t.as_str().map(String::from).or_else(
-                                            || {
-                                                t.as_i64()
-                                                    .map(|i| i.to_string())
-                                            },
-                                        )
+                        if method == "$/progress"
+                            && let Some(params) = value.get("params")
+                            && let Some(token) =
+                                params.get("token").and_then(|t| {
+                                    t.as_str().map(String::from).or_else(|| {
+                                        t.as_i64().map(|i| i.to_string())
                                     })
-                                {
-                                    if let Some(val) = params.get("value") {
-                                        let kind = val
-                                            .get("kind")
-                                            .and_then(|k| k.as_str())
-                                            .unwrap_or("");
-                                        let title = val
-                                            .get("title")
-                                            .and_then(|t| t.as_str())
-                                            .map(String::from)
-                                            .unwrap_or_default();
-                                        let message = val
-                                            .get("message")
-                                            .and_then(|m| m.as_str())
-                                            .map(String::from);
-                                        let percentage = val
-                                            .get("percentage")
-                                            .and_then(|p| p.as_u64())
-                                            .map(|p| p as u32);
+                                })
+                            && let Some(val) = params.get("value")
+                        {
+                            let kind = val
+                                .get("kind")
+                                .and_then(|k| k.as_str())
+                                .unwrap_or("");
+                            let title = val
+                                .get("title")
+                                .and_then(|t| t.as_str())
+                                .map(String::from)
+                                .unwrap_or_default();
+                            let message = val
+                                .get("message")
+                                .and_then(|m| m.as_str())
+                                .map(String::from);
+                            let percentage = val
+                                .get("percentage")
+                                .and_then(|p| p.as_u64())
+                                .map(|p| p as u32);
 
-                                        let done = kind == "end";
+                            let done = kind == "end";
 
-                                        let _ = events_reader.send(
-                                            LspEvent::Progress {
-                                                token,
-                                                server_key: server_key_reader
-                                                    .clone(),
-                                                title,
-                                                message,
-                                                percentage,
-                                                done,
-                                            },
-                                        );
-                                    }
-                                }
-                            }
+                            let _ = events_reader.send(LspEvent::Progress {
+                                token,
+                                server_key: server_key_reader.clone(),
+                                title,
+                                message,
+                                percentage,
+                                done,
+                            });
                         }
                     }
                 }

@@ -51,7 +51,7 @@ fn path_to_file_uri(path: &Path) -> String {
 impl DemoApp {
     /// Applies a completion item by inserting the text at the current cursor position
     /// and replacing the current word being typed
-    pub(super) fn apply_completion(&mut self, completion_text: String) {
+    pub(super) fn apply_completion(&mut self, completion_text: &str) {
         if let Some(tab) =
             self.tabs.iter_mut().find(|t| t.id == self.active_tab_id)
         {
@@ -141,8 +141,9 @@ impl DemoApp {
 
     /// Detaches the LSP client from the specified editor
     pub(super) fn detach_lsp_for_editor(&mut self, editor_id: EditorId) {
-        let editor = self.get_editor(editor_id);
-        editor.detach_lsp();
+        if let Some(editor) = self.get_editor(editor_id) {
+            editor.detach_lsp();
+        }
         self.set_lsp_server_for_editor(editor_id, None);
     }
 
@@ -212,10 +213,16 @@ impl DemoApp {
     ) -> bool {
         // If the correct LSP server is already attached, just open a new document
         if self.lsp_server_for_editor(editor_id) == Some(language.server_key) {
-            let editor = self.get_editor(editor_id);
-            editor
-                .lsp_open_document(LspDocument::new(uri, language.language_id));
-            return true;
+            if let Some(editor) = self.get_editor(editor_id) {
+                editor.lsp_open_document(LspDocument::new(
+                    uri,
+                    language.language_id,
+                ));
+                return true;
+            }
+            self.log("ERROR", "Editor not found for LSP document");
+            self.set_lsp_server_for_editor(editor_id, None);
+            return false;
         }
 
         // Check if we have an event sender for LSP communication
@@ -239,7 +246,11 @@ impl DemoApp {
             language.server_key,
         ) {
             Ok(client) => {
-                let editor = self.get_editor(editor_id);
+                let Some(editor) = self.get_editor(editor_id) else {
+                    self.log("ERROR", "Editor not found for LSP attach");
+                    self.set_lsp_server_for_editor(editor_id, None);
+                    return false;
+                };
                 editor.attach_lsp(
                     Box::new(client),
                     LspDocument::new(uri, language.language_id),

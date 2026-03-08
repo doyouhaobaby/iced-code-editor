@@ -322,30 +322,28 @@ greet("World")
     }
 
     /// Returns a mutable reference to the active editor.
-    fn get_active_editor(&mut self) -> &mut CodeEditor {
-        &mut self.get_active_tab().unwrap().editor
+    fn get_active_editor(&mut self) -> Option<&mut CodeEditor> {
+        self.get_active_tab().map(|tab| &mut tab.editor)
     }
 
     /// Returns a mutable reference to the active editor and its associated file path.
     fn get_active_editor_and_file(
         &mut self,
-    ) -> (&mut CodeEditor, &mut Option<PathBuf>) {
-        let tab = self.get_active_tab().unwrap();
-        (&mut tab.editor, &mut tab.file_path)
+    ) -> Option<(&mut CodeEditor, &mut Option<PathBuf>)> {
+        self.get_active_tab().map(|tab| (&mut tab.editor, &mut tab.file_path))
     }
 
     /// Returns a mutable reference to the specified editor.
-    fn get_editor(&mut self, id: EditorId) -> &mut CodeEditor {
-        &mut self.get_tab(id).unwrap().editor
+    fn get_editor(&mut self, id: EditorId) -> Option<&mut CodeEditor> {
+        self.get_tab(id).map(|tab| &mut tab.editor)
     }
 
     /// Returns a mutable reference to the specified editor and its associated file path.
     fn get_editor_and_file(
         &mut self,
         id: EditorId,
-    ) -> (&mut CodeEditor, &mut Option<PathBuf>) {
-        let tab = self.get_tab(id).unwrap();
-        (&mut tab.editor, &mut tab.file_path)
+    ) -> Option<(&mut CodeEditor, &mut Option<PathBuf>)> {
+        self.get_tab(id).map(|tab| (&mut tab.editor, &mut tab.file_path))
     }
 
     /// Handles the file open request by displaying a file picker dialog.
@@ -384,12 +382,11 @@ greet("World")
                 // If current tab is empty (no file, no content), reuse it.
                 // Otherwise create new tab.
                 let active_tab_id = self.active_tab_id;
-                let reuse_tab = {
-                    let tab = self.get_active_tab().unwrap();
+                let reuse_tab = self.get_active_tab().is_some_and(|tab| {
                     tab.file_path.is_none()
                         && tab.editor.content().trim().is_empty()
                         && !tab.is_dirty
-                };
+                });
 
                 let target_tab_id = if reuse_tab {
                     active_tab_id
@@ -432,8 +429,15 @@ greet("World")
                 );
 
                 let style = theme::from_iced_theme(&self.current_theme);
-                let (editor, current_file) =
-                    self.get_editor_and_file(target_tab_id);
+                let Some((editor, current_file)) =
+                    self.get_editor_and_file(target_tab_id)
+                else {
+                    self.log("ERROR", "Target tab not found for opened file");
+                    self.error_message = Some(
+                        "Target tab not found for opened file".to_string(),
+                    );
+                    return Task::none();
+                };
 
                 let task = editor.reset(&content);
                 editor.set_theme(style);
@@ -465,11 +469,18 @@ greet("World")
 
     /// Handles saving the current file to disk.
     fn handle_file_save(&mut self) -> Task<Message> {
-        let current_file = self.get_active_tab().unwrap().file_path.clone();
-        if let Some(path) = current_file {
+        let tab_snapshot = self
+            .tabs
+            .iter()
+            .find(|t| t.id == self.active_tab_id)
+            .map(|tab| (tab.file_path.clone(), tab.editor.content()));
+        let Some((file_path, content)) = tab_snapshot else {
+            self.log("ERROR", "No active tab to save");
+            return Task::none();
+        };
+
+        if let Some(path) = file_path {
             self.log("INFO", &format!("Saving to: {}", path.display()));
-            let editor = self.get_active_editor();
-            let content = editor.content();
             Task::perform(
                 file_ops::save_file(path, content),
                 Message::FileSaved,
@@ -482,7 +493,10 @@ greet("World")
     /// Handles the "Save As" operation by displaying a file save dialog.
     fn handle_file_save_as(&mut self) -> Task<Message> {
         self.log("INFO", "Opening save dialog...");
-        let editor = self.get_active_editor();
+        let Some(editor) = self.get_active_editor() else {
+            self.log("ERROR", "No active tab to save as");
+            return Task::none();
+        };
         let content = editor.content();
         Task::perform(
             file_ops::save_file_as_dialog(content),
@@ -498,7 +512,14 @@ greet("World")
         match result {
             Ok(path) => {
                 self.log("INFO", &format!("Saved: {}", path.display()));
-                let (editor, current_file) = self.get_active_editor_and_file();
+                let Some((editor, current_file)) =
+                    self.get_active_editor_and_file()
+                else {
+                    self.log("ERROR", "Active tab missing on save");
+                    self.error_message =
+                        Some("Active tab missing on save".to_string());
+                    return Task::none();
+                };
                 *current_file = Some(path);
                 editor.mark_saved();
 
@@ -707,8 +728,7 @@ greet("World")
             }
         }
 
-        let task = {
-            let tab = self.get_tab(editor_id).unwrap();
+        let task = if let Some(tab) = self.get_tab(editor_id) {
             let task = tab
                 .editor
                 .update(event)
@@ -721,49 +741,48 @@ greet("World")
             // For now, let's call it. It's not too expensive.
             self.check_tabs_overflow();
             task
+        } else {
+            self.log("ERROR", "Editor tab not found for event");
+            Task::none()
         };
         #[cfg(not(target_arch = "wasm32"))]
         if let EditorMessage::MouseHover(point) = event {
             self.handle_lsp_hover_from_mouse(editor_id, *point);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if let EditorMessage::JumpClick(point) = event {
-            let editor = self.get_editor(editor_id);
+        if let EditorMessage::JumpClick(point) = event
+            && let Some(editor) = self.get_editor(editor_id)
+        {
             editor.lsp_request_definition_at(*point);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        if let EditorMessage::CharacterInput(ch) = event {
-            if !self.lsp_applying_completion {
-                // If input is not a word character, clear completion state
-                if !ch.is_alphanumeric() && *ch != '_' {
-                    self.lsp_all_completions.clear();
-                    self.lsp_last_completion.clear();
-                    self.lsp_completion_filter.clear();
-                    self.lsp_completion_visible = false;
-                    self.lsp_completion_suppressed = false;
-                    if !self.lsp_hover_visible {
-                        self.lsp_overlay_editor = None;
-                    }
-                } else {
-                    self.lsp_completion_suppressed = false;
-                    if !self.lsp_all_completions.is_empty() {
-                        if let Some(tab) =
-                            self.tabs.iter().find(|t| t.id == editor_id)
-                        {
-                            let content = tab.editor.content();
-                            let (line, col) = tab.editor.cursor_position();
-                            if let Some(line_content) =
-                                content.lines().nth(line)
-                            {
-                                let word_start =
-                                    Self::find_word_start(line_content, col);
-                                let current_word =
-                                    &line_content[word_start..col];
-                                self.lsp_completion_filter =
-                                    current_word.to_string();
-                                self.filter_completions();
-                            }
-                        }
+        if let EditorMessage::CharacterInput(ch) = event
+            && !self.lsp_applying_completion
+        {
+            // If input is not a word character, clear completion state
+            if !ch.is_alphanumeric() && *ch != '_' {
+                self.lsp_all_completions.clear();
+                self.lsp_last_completion.clear();
+                self.lsp_completion_filter.clear();
+                self.lsp_completion_visible = false;
+                self.lsp_completion_suppressed = false;
+                if !self.lsp_hover_visible {
+                    self.lsp_overlay_editor = None;
+                }
+            } else {
+                self.lsp_completion_suppressed = false;
+                if !self.lsp_all_completions.is_empty()
+                    && let Some(tab) =
+                        self.tabs.iter().find(|t| t.id == editor_id)
+                {
+                    let content = tab.editor.content();
+                    let (line, col) = tab.editor.cursor_position();
+                    if let Some(line_content) = content.lines().nth(line) {
+                        let word_start =
+                            Self::find_word_start(line_content, col);
+                        let current_word = &line_content[word_start..col];
+                        self.lsp_completion_filter = current_word.to_string();
+                        self.filter_completions();
                     }
                 }
             }
@@ -813,7 +832,11 @@ greet("World")
         );
 
         let style = theme::from_iced_theme(&self.current_theme);
-        let (editor, current_file) = self.get_editor_and_file(editor_id);
+        let Some((editor, current_file)) = self.get_editor_and_file(editor_id)
+        else {
+            self.log("ERROR", "Editor tab not found for template");
+            return Task::none();
+        };
 
         let task = editor.reset(template.content());
         editor.set_theme(style);
@@ -837,8 +860,10 @@ greet("World")
             "INFO",
             &format!("Running code from {:?} editor...", self.active_tab_id),
         );
-
-        let editor = self.get_active_editor();
+        let Some(editor) = self.get_active_editor() else {
+            self.log("ERROR", "No active tab to run code");
+            return Task::none();
+        };
         let line_count = editor.content().lines().count();
         self.log("OUTPUT", &format!("Script has {} lines", line_count));
         self.log("OUTPUT", "Execution completed (simulated)");
@@ -874,10 +899,14 @@ greet("World")
         {
             let editor_id = tab.id;
             self.active_tab_id = editor_id;
-            let editor = &mut self.get_tab(editor_id).unwrap().editor;
-            return editor
-                .set_cursor(line, col)
-                .map(move |e| Message::EditorEvent(editor_id, e));
+            if let Some(tab) = self.get_tab(editor_id) {
+                return tab
+                    .editor
+                    .set_cursor(line, col)
+                    .map(move |e| Message::EditorEvent(editor_id, e));
+            }
+            self.log("ERROR", "Editor tab not found for jump");
+            return Task::none();
         }
 
         // Open file in new tab (or reuse empty one)
@@ -900,20 +929,23 @@ greet("World")
                 {
                     let editor_id = tab.id;
                     self.active_tab_id = editor_id;
-                    let editor = &mut self.get_tab(editor_id).unwrap().editor;
-                    return editor
-                        .set_cursor(line, col)
-                        .map(move |e| Message::EditorEvent(editor_id, e));
+                    if let Some(tab) = self.get_tab(editor_id) {
+                        return tab
+                            .editor
+                            .set_cursor(line, col)
+                            .map(move |e| Message::EditorEvent(editor_id, e));
+                    }
+                    self.log("ERROR", "Editor tab not found for jump");
+                    return Task::none();
                 }
 
                 // New tab logic similar to handle_file_opened
                 let active_tab_id = self.active_tab_id;
-                let reuse_tab = {
-                    let tab = self.get_active_tab().unwrap();
+                let reuse_tab = self.get_active_tab().is_some_and(|tab| {
                     tab.file_path.is_none()
                         && tab.editor.content().trim().is_empty()
                         && !tab.is_dirty
-                };
+                });
 
                 let target_tab_id = if reuse_tab {
                     active_tab_id
@@ -946,8 +978,15 @@ greet("World")
                     new_id
                 };
 
-                let (editor, current_file) =
-                    self.get_editor_and_file(target_tab_id);
+                let Some((editor, current_file)) =
+                    self.get_editor_and_file(target_tab_id)
+                else {
+                    self.log("ERROR", "Target tab not found for opened file");
+                    self.error_message = Some(
+                        "Target tab not found for opened file".to_string(),
+                    );
+                    return Task::none();
+                };
                 *current_file = Some(path.clone());
                 let t1 = editor
                     .reset(&content)
@@ -1077,11 +1116,11 @@ greet("World")
             }
             Message::Tick => self.handle_tick(),
             Message::WindowEvent(event) => {
-                if let Event::Window(window_event) = &event {
-                    if let window::Event::Resized(size) = window_event {
-                        self.window_width = size.width as f32;
-                        self.check_tabs_overflow();
-                    }
+                if let Event::Window(window_event) = &event
+                    && let window::Event::Resized(size) = window_event
+                {
+                    self.window_width = size.width;
+                    self.check_tabs_overflow();
                 }
 
                 #[cfg(not(target_arch = "wasm32"))]
@@ -1095,25 +1134,22 @@ greet("World")
                     }
 
                     // Handle Escape key to close completion
-                    if let Event::Keyboard(
-                        iced::keyboard::Event::KeyPressed {
-                            key:
-                                iced::keyboard::Key::Named(
-                                    iced::keyboard::key::Named::Escape,
-                                ),
-                            ..
-                        },
-                    ) = &event
+                    if let Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                        key:
+                            iced::keyboard::Key::Named(
+                                iced::keyboard::key::Named::Escape,
+                            ),
+                        ..
+                    }) = &event
+                        && self.lsp_completion_visible
                     {
-                        if self.lsp_completion_visible {
-                            self.lsp_all_completions.clear();
-                            self.lsp_last_completion.clear();
-                            self.lsp_completion_filter.clear();
-                            self.lsp_completion_visible = false;
-                            self.lsp_completion_suppressed = false;
-                            if !self.lsp_hover_visible {
-                                self.lsp_overlay_editor = None;
-                            }
+                        self.lsp_all_completions.clear();
+                        self.lsp_last_completion.clear();
+                        self.lsp_completion_filter.clear();
+                        self.lsp_completion_visible = false;
+                        self.lsp_completion_suppressed = false;
+                        if !self.lsp_hover_visible {
+                            self.lsp_overlay_editor = None;
                         }
                     }
                 }
@@ -1170,8 +1206,10 @@ greet("World")
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     self.lsp_applying_completion = true;
-                    if let Some(item) = self.lsp_last_completion.get(index) {
-                        self.apply_completion(item.clone());
+                    let completion =
+                        self.lsp_last_completion.get(index).cloned();
+                    if let Some(item) = completion {
+                        self.apply_completion(&item);
                     }
                     self.lsp_applying_completion = false;
                     self.lsp_completion_visible = false;
@@ -1229,10 +1267,10 @@ greet("World")
                     if self.lsp_completion_visible {
                         let selected = self.lsp_completion_selected;
                         self.lsp_applying_completion = true;
-                        if let Some(item) =
-                            self.lsp_last_completion.get(selected).cloned()
-                        {
-                            self.apply_completion(item);
+                        let completion =
+                            self.lsp_last_completion.get(selected).cloned();
+                        if let Some(item) = completion {
+                            self.apply_completion(&item);
                         }
                         self.lsp_applying_completion = false;
                         self.lsp_completion_visible = false;
