@@ -413,6 +413,7 @@ pub fn view_editor_pane<'a>(
     let wrap_enabled = editor.wrap_enabled();
     let search_replace_enabled = editor.search_replace_enabled();
     let line_numbers_enabled = editor.line_numbers_enabled();
+    let lsp_enabled = editor.lsp_enabled();
 
     // Template picker using pick_list
     let template_picker =
@@ -440,10 +441,17 @@ pub fn view_editor_pane<'a>(
         .on_toggle(move |b| Message::ToggleLineNumbers(editor_id, b))
         .text_size(14);
 
+    // LSP enabled checkbox
+    let lsp_enabled_checkbox = checkbox(lsp_enabled)
+        .label("Enable LSP")
+        .on_toggle(move |b| Message::ToggleLsp(editor_id, b))
+        .text_size(14);
+
     // LSP Status
     #[cfg(not(target_arch = "wasm32"))]
-    let lsp_status: Element<'_, Message> = if let Some(key) = tab.lsp_server_key
-    {
+    let lsp_status: Element<'_, Message> = if !lsp_enabled {
+        Space::new().into()
+    } else if let Some(key) = tab.lsp_server_key {
         let (status_text, is_working, is_finishing) =
             if let Some(progress_map) = app.lsp_progress.get(key) {
                 if let Some(progress) = progress_map.values().next() {
@@ -520,7 +528,11 @@ pub fn view_editor_pane<'a>(
     };
 
     #[cfg(target_arch = "wasm32")]
-    let lsp_status: Element<'_, Message> = text("LSP: N/A").size(14).into();
+    let lsp_status: Element<'_, Message> = if lsp_enabled {
+        text("LSP: N/A").size(14).into()
+    } else {
+        Space::new().into()
+    };
 
     // Editor in a constrained container
     let editor_view = container(
@@ -555,6 +567,8 @@ pub fn view_editor_pane<'a>(
                 search_replace_checkbox,
                 Space::new().width(10),
                 line_numbers_checkbox,
+                Space::new().width(10),
+                lsp_enabled_checkbox,
                 Space::new().width(10),
                 lsp_status
             ]

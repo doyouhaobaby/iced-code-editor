@@ -1,16 +1,16 @@
 use crate::file_ops;
-#[cfg(not(target_arch = "wasm32"))]
-use crate::lsp_process_client::LspEvent;
 use crate::types::{EditorId, FontOption, LanguageOption, Template};
+#[cfg(not(target_arch = "wasm32"))]
+use iced::mouse;
 #[cfg(not(target_arch = "wasm32"))]
 use iced::widget::Id;
 #[cfg(not(target_arch = "wasm32"))]
-use iced::widget::operation::{focus, scroll_to};
-#[cfg(not(target_arch = "wasm32"))]
-use iced::widget::scrollable;
+use iced::widget::operation::focus;
 use iced::{Event, Subscription, Task, Theme, event, window};
 #[cfg(not(target_arch = "wasm32"))]
-use iced::{Point, mouse};
+use iced_code_editor::LspEvent;
+#[cfg(not(target_arch = "wasm32"))]
+use iced_code_editor::LspOverlayState;
 #[cfg(not(target_arch = "wasm32"))]
 use iced_code_editor::LspPosition;
 use iced_code_editor::Message as EditorMessage;
@@ -28,6 +28,16 @@ use std::time::{Duration, Instant};
 mod app_lsp;
 #[cfg(not(target_arch = "wasm32"))]
 use app_lsp::LspHoverPending;
+
+/// Delay in milliseconds before hiding the hover tooltip when the cursor leaves the window.
+#[cfg(not(target_arch = "wasm32"))]
+const LSP_HOVER_CURSOR_LEFT_MS: u64 = 400;
+/// Delay in milliseconds before hiding the hover tooltip after the mouse exits the tooltip.
+#[cfg(not(target_arch = "wasm32"))]
+const LSP_HOVER_TOOLTIP_EXIT_MS: u64 = 300;
+/// Delay in milliseconds before hiding the hover tooltip after the cursor leaves the editor.
+#[cfg(not(target_arch = "wasm32"))]
+const LSP_HOVER_HIDE_DELAY_MS: u64 = 500;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone)]
@@ -78,34 +88,13 @@ pub struct DemoApp {
     lsp_events: Option<mpsc::Receiver<LspEvent>>,
     #[cfg(not(target_arch = "wasm32"))]
     lsp_event_sender: Option<mpsc::Sender<LspEvent>>,
+    /// Aggregated LSP overlay display state (hover + completion).
     #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_last_hover: Option<String>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_last_completion: Vec<String>,
-    #[cfg(not(target_arch = "wasm32"))]
-    lsp_all_completions: Vec<String>,
-    #[cfg(not(target_arch = "wasm32"))]
-    lsp_completion_filter: String,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_hover_items: Vec<iced::widget::markdown::Item>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_hover_visible: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_completion_visible: bool,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_completion_selected: usize,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_completion_suppressed: bool,
+    pub lsp_overlay: LspOverlayState,
     #[cfg(not(target_arch = "wasm32"))]
     lsp_applying_completion: bool,
     #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_completion_position: Option<Point>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_hover_position: Option<Point>,
-    #[cfg(not(target_arch = "wasm32"))]
     pub lsp_hover_anchor: Option<(EditorId, LspPosition)>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub lsp_hover_interactive: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub lsp_overlay_editor: Option<EditorId>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -171,6 +160,8 @@ pub enum Message {
     ToggleSearchReplace(EditorId, bool),
     /// Toggle line numbers
     ToggleLineNumbers(EditorId, bool),
+    /// Toggle LSP support
+    ToggleLsp(EditorId, bool),
     /// Test text input changed
     TextInputChanged(String),
     /// Test text input clicked
@@ -182,19 +173,7 @@ pub enum Message {
     /// New empty tab
     NewTab,
     #[cfg(not(target_arch = "wasm32"))]
-    LspHoverEntered,
-    #[cfg(not(target_arch = "wasm32"))]
-    LspHoverExited,
-    #[cfg(not(target_arch = "wasm32"))]
-    LspCompletionSelected(usize),
-    #[cfg(not(target_arch = "wasm32"))]
-    LspCompletionClosed,
-    #[cfg(not(target_arch = "wasm32"))]
-    LspCompletionNavigateUp,
-    #[cfg(not(target_arch = "wasm32"))]
-    LspCompletionNavigateDown,
-    #[cfg(not(target_arch = "wasm32"))]
-    LspCompletionConfirm,
+    LspOverlay(iced_code_editor::LspOverlayMessage),
     #[cfg(not(target_arch = "wasm32"))]
     JumpToFile(PathBuf, usize, usize),
     #[cfg(not(target_arch = "wasm32"))]
@@ -267,33 +246,11 @@ greet("World")
             #[cfg(not(target_arch = "wasm32"))]
             lsp_event_sender,
             #[cfg(not(target_arch = "wasm32"))]
-            lsp_last_hover: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_last_completion: Vec::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_all_completions: Vec::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_completion_filter: String::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_hover_items: Vec::new(),
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_hover_visible: false,
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_completion_visible: false,
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_completion_selected: 0,
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_completion_suppressed: false,
+            lsp_overlay: LspOverlayState::new(),
             #[cfg(not(target_arch = "wasm32"))]
             lsp_applying_completion: false,
             #[cfg(not(target_arch = "wasm32"))]
-            lsp_completion_position: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_hover_position: None,
-            #[cfg(not(target_arch = "wasm32"))]
             lsp_hover_anchor: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            lsp_hover_interactive: false,
             #[cfg(not(target_arch = "wasm32"))]
             lsp_overlay_editor: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -685,6 +642,39 @@ greet("World")
         Task::none()
     }
 
+    /// Handles toggling LSP support for a specific editor.
+    fn handle_toggle_lsp(
+        &mut self,
+        editor_id: EditorId,
+        enabled: bool,
+    ) -> Task<Message> {
+        self.log(
+            "INFO",
+            &format!(
+                "LSP {} in {:?} editor",
+                if enabled { "enabled" } else { "disabled" },
+                editor_id
+            ),
+        );
+
+        if enabled {
+            if let Some(tab) = self.get_tab(editor_id) {
+                tab.editor.set_lsp_enabled(true);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.sync_lsp_for_editor(editor_id);
+            }
+        } else {
+            if let Some(tab) = self.get_tab(editor_id) {
+                tab.editor.set_lsp_enabled(false);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            self.set_lsp_server_for_editor(editor_id, None);
+        }
+        Task::none()
+    }
+
     /// Handles editor-specific events by forwarding them to the appropriate editor.
     fn handle_editor_event(
         &mut self,
@@ -695,53 +685,47 @@ greet("World")
         {
             // Intercept Escape to close completion menu
             if matches!(event, EditorMessage::CloseSearch)
-                && self.lsp_completion_visible
+                && self.lsp_overlay.completion_visible
             {
-                self.lsp_all_completions.clear();
-                self.lsp_last_completion.clear();
-                self.lsp_completion_filter.clear();
-                self.lsp_completion_visible = false;
-                self.lsp_completion_suppressed = false;
-                if !self.lsp_hover_visible {
+                self.lsp_overlay.clear_completions();
+                if !self.lsp_overlay.hover_visible {
                     self.lsp_overlay_editor = None;
                 }
                 return Task::none();
             }
 
             // Intercept keyboard events when completion menu is visible and should show
-            if self.lsp_completion_visible
-                && !self.lsp_completion_suppressed
-                && !self.lsp_last_completion.is_empty()
+            if self.lsp_overlay.completion_visible
+                && !self.lsp_overlay.completion_suppressed
+                && !self.lsp_overlay.completion_items.is_empty()
             {
                 match event {
                     EditorMessage::ArrowKey(direction, false) => {
                         use iced_code_editor::ArrowDirection;
                         match direction {
                             ArrowDirection::Up => {
-                                return Task::done(
-                                    Message::LspCompletionNavigateUp,
-                                );
+                                return Task::done(Message::LspOverlay(
+                                    iced_code_editor::LspOverlayMessage::CompletionNavigateUp,
+                                ));
                             }
                             ArrowDirection::Down => {
-                                return Task::done(
-                                    Message::LspCompletionNavigateDown,
-                                );
+                                return Task::done(Message::LspOverlay(
+                                    iced_code_editor::LspOverlayMessage::CompletionNavigateDown,
+                                ));
                             }
                             ArrowDirection::Left | ArrowDirection::Right => {
                                 // Clear completion when navigating left/right away from word
-                                self.lsp_all_completions.clear();
-                                self.lsp_last_completion.clear();
-                                self.lsp_completion_filter.clear();
-                                self.lsp_completion_visible = false;
-                                self.lsp_completion_suppressed = false;
-                                if !self.lsp_hover_visible {
+                                self.lsp_overlay.clear_completions();
+                                if !self.lsp_overlay.hover_visible {
                                     self.lsp_overlay_editor = None;
                                 }
                             }
                         }
                     }
                     EditorMessage::Enter => {
-                        return Task::done(Message::LspCompletionConfirm);
+                        return Task::done(Message::LspOverlay(
+                            iced_code_editor::LspOverlayMessage::CompletionConfirm,
+                        ));
                     }
                     _ => {}
                 }
@@ -781,17 +765,13 @@ greet("World")
         {
             // If input is not a word character, clear completion state
             if !ch.is_alphanumeric() && *ch != '_' {
-                self.lsp_all_completions.clear();
-                self.lsp_last_completion.clear();
-                self.lsp_completion_filter.clear();
-                self.lsp_completion_visible = false;
-                self.lsp_completion_suppressed = false;
-                if !self.lsp_hover_visible {
+                self.lsp_overlay.clear_completions();
+                if !self.lsp_overlay.hover_visible {
                     self.lsp_overlay_editor = None;
                 }
             } else {
-                self.lsp_completion_suppressed = false;
-                if !self.lsp_all_completions.is_empty()
+                self.lsp_overlay.completion_suppressed = false;
+                if !self.lsp_overlay.all_completions.is_empty()
                     && let Some(tab) =
                         self.tabs.iter().find(|t| t.id == editor_id)
                 {
@@ -801,8 +781,9 @@ greet("World")
                         let word_start =
                             Self::find_word_start(line_content, col);
                         let current_word = &line_content[word_start..col];
-                        self.lsp_completion_filter = current_word.to_string();
-                        self.filter_completions();
+                        self.lsp_overlay.completion_filter =
+                            current_word.to_string();
+                        self.lsp_overlay.filter_completions();
                     }
                 }
             }
@@ -1114,6 +1095,9 @@ greet("World")
             Message::ToggleLineNumbers(editor_id, enabled) => {
                 self.handle_toggle_line_numbers(editor_id, enabled)
             }
+            Message::ToggleLsp(editor_id, enabled) => {
+                self.handle_toggle_lsp(editor_id, enabled)
+            }
             // Editor events
             Message::EditorEvent(editor_id, event) => {
                 self.handle_editor_event(editor_id, &event)
@@ -1128,11 +1112,13 @@ greet("World")
             Message::EditorMouseExited(_editor_id) => {
                 #[cfg(not(target_arch = "wasm32"))]
                 if self.lsp_overlay_editor == Some(_editor_id)
-                    && self.lsp_hover_visible
-                    && !self.lsp_hover_interactive
+                    && self.lsp_overlay.hover_visible
+                    && !self.lsp_overlay.hover_interactive
                 {
-                    self.lsp_hover_hide_deadline =
-                        Some(Instant::now() + Duration::from_millis(500));
+                    self.lsp_hover_hide_deadline = Some(
+                        Instant::now()
+                            + Duration::from_millis(LSP_HOVER_HIDE_DELAY_MS),
+                    );
                 }
                 Task::none()
             }
@@ -1148,11 +1134,15 @@ greet("World")
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     if matches!(event, Event::Mouse(mouse::Event::CursorLeft))
-                        && self.lsp_hover_visible
+                        && self.lsp_overlay.hover_visible
                     {
-                        self.lsp_hover_interactive = false;
-                        self.lsp_hover_hide_deadline =
-                            Some(Instant::now() + Duration::from_millis(400));
+                        self.lsp_overlay.hover_interactive = false;
+                        self.lsp_hover_hide_deadline = Some(
+                            Instant::now()
+                                + Duration::from_millis(
+                                    LSP_HOVER_CURSOR_LEFT_MS,
+                                ),
+                        );
                     }
 
                     // Handle Escape key to close completion
@@ -1163,16 +1153,10 @@ greet("World")
                             ),
                         ..
                     }) = &event
-                        && self.lsp_completion_visible
+                        && self.lsp_overlay.completion_visible
                     {
-                        self.lsp_all_completions.clear();
-                        self.lsp_last_completion.clear();
-                        self.lsp_completion_filter.clear();
-                        self.lsp_completion_visible = false;
-                        self.lsp_completion_suppressed = false;
-                        if !self.lsp_hover_visible {
-                            self.lsp_overlay_editor = None;
-                        }
+                        self.lsp_overlay.clear_completions();
+                        self.clear_overlay_editor_if_no_hover();
                     }
                 }
                 Task::none()
@@ -1196,100 +1180,73 @@ greet("World")
                 self.handle_file_opened_and_jump(result)
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Message::LspHoverEntered => {
-                self.lsp_hover_interactive = true;
-                self.lsp_hover_hide_deadline = None;
-                for tab in &mut self.tabs {
-                    tab.editor.lose_focus();
-                }
-                focus(Id::new("lsp_hover_text_editor"))
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspHoverExited => {
-                self.lsp_hover_interactive = false;
-                self.lsp_hover_hide_deadline =
-                    Some(Instant::now() + Duration::from_millis(300));
-                Task::none()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspCompletionClosed => {
-                self.lsp_completion_visible = false;
-                self.lsp_completion_suppressed = false;
-                if !self.lsp_hover_visible {
-                    self.lsp_overlay_editor = None;
-                }
-                Task::none()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspCompletionSelected(index) => {
-                self.lsp_applying_completion = true;
-                let completion = self.lsp_last_completion.get(index).cloned();
-                if let Some(item) = completion {
-                    self.apply_completion(&item);
-                }
-                self.lsp_applying_completion = false;
-                self.lsp_completion_visible = false;
-                self.lsp_completion_suppressed = true;
-                if !self.lsp_hover_visible {
-                    self.lsp_overlay_editor = None;
-                }
-                Task::none()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspCompletionNavigateUp => {
-                if self.lsp_completion_visible
-                    && !self.lsp_last_completion.is_empty()
-                {
-                    if self.lsp_completion_selected > 0 {
-                        self.lsp_completion_selected -= 1;
-                    } else {
-                        self.lsp_completion_selected =
-                            self.lsp_last_completion.len() - 1;
+            Message::LspOverlay(msg) => {
+                use iced_code_editor::LspOverlayMessage;
+                match msg {
+                    LspOverlayMessage::HoverEntered => {
+                        self.lsp_overlay.hover_interactive = true;
+                        self.lsp_hover_hide_deadline = None;
+                        for tab in &mut self.tabs {
+                            tab.editor.lose_focus();
+                        }
+                        focus(Id::new("lsp_hover_text_editor"))
                     }
-                    let selected = self.lsp_completion_selected;
-                    let scroll_y = selected as f32 * 20.0;
-                    return scroll_to(
-                        Id::new("completion_scrollable"),
-                        scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
-                    );
-                }
-                Task::none()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspCompletionNavigateDown => {
-                if self.lsp_completion_visible
-                    && !self.lsp_last_completion.is_empty()
-                {
-                    self.lsp_completion_selected =
-                        (self.lsp_completion_selected + 1)
-                            % self.lsp_last_completion.len();
-                    let selected = self.lsp_completion_selected;
-                    let scroll_y = selected as f32 * 20.0;
-                    return scroll_to(
-                        Id::new("completion_scrollable"),
-                        scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
-                    );
-                }
-                Task::none()
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Message::LspCompletionConfirm => {
-                if self.lsp_completion_visible {
-                    let selected = self.lsp_completion_selected;
-                    self.lsp_applying_completion = true;
-                    let completion =
-                        self.lsp_last_completion.get(selected).cloned();
-                    if let Some(item) = completion {
-                        self.apply_completion(&item);
+                    LspOverlayMessage::HoverExited => {
+                        self.lsp_overlay.hover_interactive = false;
+                        self.lsp_hover_hide_deadline = Some(
+                            Instant::now()
+                                + Duration::from_millis(
+                                    LSP_HOVER_TOOLTIP_EXIT_MS,
+                                ),
+                        );
+                        Task::none()
                     }
-                    self.lsp_applying_completion = false;
-                    self.lsp_completion_visible = false;
-                    self.lsp_completion_suppressed = true;
-                    if !self.lsp_hover_visible {
-                        self.lsp_overlay_editor = None;
+                    LspOverlayMessage::CompletionClosed => {
+                        self.lsp_overlay.completion_visible = false;
+                        self.lsp_overlay.completion_suppressed = false;
+                        self.clear_overlay_editor_if_no_hover();
+                        Task::none()
+                    }
+                    LspOverlayMessage::CompletionSelected(index) => {
+                        self.lsp_applying_completion = true;
+                        let completion = self
+                            .lsp_overlay
+                            .completion_items
+                            .get(index)
+                            .cloned();
+                        if let Some(item) = completion {
+                            self.apply_completion(&item);
+                        }
+                        self.lsp_applying_completion = false;
+                        self.lsp_overlay.completion_visible = false;
+                        self.lsp_overlay.completion_suppressed = true;
+                        self.clear_overlay_editor_if_no_hover();
+                        Task::none()
+                    }
+                    LspOverlayMessage::CompletionNavigateUp => {
+                        self.navigate_completion(-1)
+                    }
+                    LspOverlayMessage::CompletionNavigateDown => {
+                        self.navigate_completion(1)
+                    }
+                    LspOverlayMessage::CompletionConfirm => {
+                        if self.lsp_overlay.completion_visible {
+                            self.lsp_applying_completion = true;
+                            let completion = self
+                                .lsp_overlay
+                                .selected_item()
+                                .map(str::to_owned);
+                            if let Some(item) = completion {
+                                self.apply_completion(&item);
+                            }
+                            self.lsp_applying_completion = false;
+                            self.lsp_overlay.completion_visible = false;
+                            self.lsp_overlay.completion_suppressed = true;
+                            self.clear_overlay_editor_if_no_hover();
+                        }
+                        Task::none()
                     }
                 }
-                Task::none()
             }
             // Tab management
             Message::CloseTab(id) => {

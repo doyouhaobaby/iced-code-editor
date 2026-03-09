@@ -727,7 +727,6 @@ dependencies = [
  "iced-code-editor",
  "iced_aw",
  "rfd",
- "serde_json",
  "wasm-bindgen",
 ]
 
@@ -1372,6 +1371,7 @@ dependencies = [
  "iced_aw",
  "iced_font_awesome",
  "rust-i18n",
+ "serde_json",
  "syntect",
  "unicode-width",
  "web-time",

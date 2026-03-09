@@ -35,6 +35,7 @@ Screenshot of the demo application:
 - **Line wrapping** to split long lines
 - **High performance** canvas-based rendering
 - **Search and replace** text
+- **Language Server Protocol** (LSP) support
 
 ## Planned features
 
@@ -42,7 +43,6 @@ Screenshot of the demo application:
 - [ ] Collapse/expand blocks
 - [ ] Indentation-based or syntax-aware
 - [ ] Minimap
-- [ ] Auto-completion
 
 ## Quick Start
 
@@ -127,6 +127,7 @@ The editor supports a comprehensive set of keyboard shortcuts:
 | **Delete**         | Delete character after cursor (or delete selection if text is selected)  |
 | **Shift + Delete** | Delete selected text (same as Delete when selection exists)              |
 | **Enter**          | Insert new line                                                          |
+| **Tab**            | Insert 4 spaces (indent)                                                 |
 
 ### Clipboard
 
@@ -146,10 +147,25 @@ The editor features smart command grouping - consecutive typing is grouped into 
 
 ### Search and Replace
 
-| Shortcut     | Action                      |
-| ------------ | --------------------------- |
-| **Ctrl + F** | Open search dialog          |
-| **Ctrl + H** | Open search and replace dialog |
+| Shortcut          | Action                         |
+| ----------------- | ------------------------------ |
+| **Ctrl + F**      | Open search dialog             |
+| **Ctrl + H**      | Open search and replace dialog |
+| **F3**            | Find next match                |
+| **Shift + F3**    | Find previous match            |
+| **Escape**        | Close search dialog            |
+
+### LSP Completion
+
+These shortcuts are active only when the LSP completion menu is visible:
+
+| Shortcut                          | Action                              |
+| --------------------------------- | ----------------------------------- |
+| **Arrow Up**                      | Navigate to previous completion item |
+| **Arrow Down**                    | Navigate to next completion item    |
+| **Enter**                         | Confirm and apply selected completion |
+| **Escape**                        | Close completion menu               |
+| **Arrow Left** / **Arrow Right**  | Clear completion menu               |
 
 ## Usage Examples
 
@@ -271,6 +287,104 @@ if editor.line_numbers_enabled() {
 ```
 
 When disabled, the gutter is completely removed (0px width), providing more horizontal space for code display.
+
+### Language Server Protocol (LSP)
+
+LSP support provides hover documentation, auto-completion, and go-to-definition. It requires the `lsp-process` feature (not available on WASM):
+
+```toml
+[dependencies]
+iced-code-editor = { version = "0.3", features = ["lsp-process"] }
+```
+
+#### Enable/disable LSP on an editor
+
+```rust
+// Enable LSP (attach a client and open the document)
+editor.set_lsp_enabled(true);
+
+// Disable LSP (detach the client)
+editor.set_lsp_enabled(false);
+```
+
+#### Connecting an LSP server
+
+```rust
+use std::sync::mpsc;
+use iced_code_editor::{LspProcessClient, LspEvent, LspDocument};
+
+// Create a channel to receive LSP events
+let (tx, rx) = mpsc::channel::<LspEvent>();
+
+// Start the server (e.g., lua-language-server)
+let client = LspProcessClient::new_with_server(
+    "file:///path/to/project",
+    tx,
+    "lua-language-server",
+)?;
+
+// Attach the client to an editor with a document URI
+editor.attach_lsp(
+    Box::new(client),
+    LspDocument::new("file:///path/to/file.lua", "lua"),
+);
+```
+
+#### Rendering the overlay (hover + completion)
+
+Use `LspOverlayState` to hold display state and `view_lsp_overlay` to render it:
+
+```rust
+use iced_code_editor::{LspOverlayState, LspOverlayMessage, view_lsp_overlay};
+
+struct App {
+    editor: CodeEditor,
+    overlay: LspOverlayState,
+}
+
+#[derive(Clone)]
+enum Message {
+    LspOverlay(LspOverlayMessage),
+    // ...
+}
+
+fn view(app: &App) -> Element<'_, Message> {
+    // Stack the overlay on top of the editor
+    stack![
+        app.editor.view().map(Message::EditorEvent),
+        view_lsp_overlay(
+            &app.overlay,
+            &app.editor,
+            &app.theme,
+            14.0,    // font size
+            20.0,    // line height
+            Message::LspOverlay,
+        ),
+    ].into()
+}
+```
+
+Poll `LspEvent`s from the channel on each tick and update the overlay state:
+
+```rust
+// On LspEvent::Hover
+overlay.show_hover(text);
+
+// On LspEvent::Completion
+overlay.set_completions(items, cursor_position);
+```
+
+#### Supported servers
+
+Out of the box, the following servers are supported (the binary must be on `$PATH`):
+
+| Server key              | Language     |
+| ----------------------- | ------------ |
+| `lua-language-server`   | Lua          |
+| `rust-analyzer`         | Rust         |
+| `pylsp`                 | Python       |
+| `clangd`                | C / C++      |
+| `typescript-language-server` | JS / TS |
 
 ### Changing font
 

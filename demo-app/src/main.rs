@@ -11,10 +11,6 @@
 
 mod app;
 mod file_ops;
-#[cfg(not(target_arch = "wasm32"))]
-mod lsp_config;
-#[cfg(not(target_arch = "wasm32"))]
-mod lsp_process_client;
 mod types;
 mod ui;
 

@@ -5,20 +5,29 @@
 //! provides functionality to resolve the correct server command based on environment
 //! variables and system availability.
 
-#![cfg(not(target_arch = "wasm32"))]
-
-use crate::types::Template;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Represents a language supported by an LSP server.
+///
 /// Contains the language identifier and the associated server key.
+///
+/// # Examples
+///
+/// ```no_run
+/// use iced_code_editor::lsp_language_for_extension;
+///
+/// if let Some(lang) = lsp_language_for_extension("rs") {
+///     assert_eq!(lang.language_id, "rust");
+///     assert_eq!(lang.server_key, "rust-analyzer");
+/// }
+/// ```
 #[derive(Clone, Copy)]
-pub(crate) struct LspLanguage {
+pub struct LspLanguage {
     /// Language identifier (e.g., "rust", "python", "typescript")
-    pub(crate) language_id: &'static str,
+    pub language_id: &'static str,
     /// Key identifying the LSP server (e.g., "rust-analyzer", "pyright")
-    pub(crate) server_key: &'static str,
+    pub server_key: &'static str,
 }
 
 /// Internal mapping between file extensions and language/server configurations.
@@ -33,23 +42,46 @@ struct LspLanguageMapping {
 }
 
 /// Configuration for an LSP server.
+///
 /// Defines how to locate and run the language server.
+///
+/// # Examples
+///
+/// ```no_run
+/// use iced_code_editor::lsp_server_config;
+///
+/// if let Some(config) = lsp_server_config("rust-analyzer") {
+///     println!("key: {}", config.key);
+/// }
+/// ```
 #[derive(Clone, Copy)]
-pub(crate) struct LspServerConfig {
+pub struct LspServerConfig {
     /// Unique identifier for this server configuration
-    pub(crate) key: &'static str,
+    pub key: &'static str,
     /// Environment variables to check for custom server paths (checked in order)
-    pub(crate) env_vars: &'static [&'static str],
+    pub env_vars: &'static [&'static str],
     /// Default command and arguments to run the server
-    pub(crate) default_command: &'static [&'static str],
+    pub default_command: &'static [&'static str],
 }
 
 /// Resolved command to execute an LSP server.
-pub(crate) struct LspCommand {
+///
+/// # Examples
+///
+/// ```no_run
+/// use iced_code_editor::{lsp_server_config, resolve_lsp_command};
+///
+/// if let Some(config) = lsp_server_config("gopls") {
+///     if let Ok(cmd) = resolve_lsp_command(config) {
+///         println!("program: {}", cmd.program);
+///     }
+/// }
+/// ```
+pub struct LspCommand {
     /// Program path or name
-    pub(crate) program: String,
+    pub program: String,
     /// Command-line arguments
-    pub(crate) args: Vec<String>,
+    pub args: Vec<String>,
 }
 
 /// Supported language mappings: file extensions -> language ID -> server key
@@ -120,10 +152,21 @@ const LSP_SERVER_CONFIGS: &[LspServerConfig] = &[
 ];
 
 /// Looks up the LSP language configuration for a file extension.
-/// Returns None if the extension is not supported.
-pub(crate) fn lsp_language_for_extension(
-    extension: &str,
-) -> Option<LspLanguage> {
+///
+/// Returns `None` if the extension is not supported.
+///
+/// # Examples
+///
+/// ```
+/// use iced_code_editor::lsp_language_for_extension;
+///
+/// let lang = lsp_language_for_extension("rs");
+/// assert!(lang.is_some());
+///
+/// let unknown = lsp_language_for_extension("xyz");
+/// assert!(unknown.is_none());
+/// ```
+pub fn lsp_language_for_extension(extension: &str) -> Option<LspLanguage> {
     let extension = extension.to_lowercase();
     LSP_LANGUAGE_MAPPINGS
         .iter()
@@ -140,35 +183,66 @@ pub(crate) fn lsp_language_for_extension(
 }
 
 /// Looks up the LSP language configuration for a file path.
-/// Extracts the extension and delegates to lsp_language_for_extension.
-pub(crate) fn lsp_language_for_path(path: &Path) -> Option<LspLanguage> {
+///
+/// Extracts the extension and delegates to [`lsp_language_for_extension`].
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// use iced_code_editor::lsp_language_for_path;
+///
+/// let lang = lsp_language_for_path(Path::new("main.rs"));
+/// assert!(lang.is_some());
+///
+/// let none = lsp_language_for_path(Path::new("noext"));
+/// assert!(none.is_none());
+/// ```
+pub fn lsp_language_for_path(path: &Path) -> Option<LspLanguage> {
     let extension = path.extension()?.to_str()?;
     lsp_language_for_extension(extension)
 }
 
-/// Looks up the LSP language configuration for a template.
-/// All built-in templates use Lua syntax.
-pub(crate) fn lsp_language_for_template(
-    template: Template,
-) -> Option<LspLanguage> {
-    let extension = match template {
-        Template::Empty => "lua",
-        Template::HelloWorld => "lua",
-        Template::Fibonacci => "lua",
-        Template::Factorial => "lua",
-    };
-    lsp_language_for_extension(extension)
-}
-
 /// Retrieves the server configuration for a given server key.
-pub(crate) fn lsp_server_config(key: &str) -> Option<&'static LspServerConfig> {
+///
+/// # Examples
+///
+/// ```
+/// use iced_code_editor::lsp_server_config;
+///
+/// let cfg = lsp_server_config("rust-analyzer");
+/// assert!(cfg.is_some());
+///
+/// let missing = lsp_server_config("unknown-server");
+/// assert!(missing.is_none());
+/// ```
+pub fn lsp_server_config(key: &str) -> Option<&'static LspServerConfig> {
     LSP_SERVER_CONFIGS.iter().find(|config| config.key == key)
 }
 
 /// Resolves the command to execute an LSP server.
+///
 /// Checks environment variables first, then falls back to the default command.
 /// Special handling for rust-analyzer to support rustup-installed versions.
-pub(crate) fn resolve_lsp_command(
+///
+/// # Errors
+///
+/// Returns an error string if the program cannot be located (e.g. rust-analyzer
+/// or gopls are not installed and not found via their fallback discovery logic).
+///
+/// # Examples
+///
+/// ```no_run
+/// use iced_code_editor::{lsp_server_config, resolve_lsp_command};
+///
+/// if let Some(config) = lsp_server_config("lua-language-server") {
+///     match resolve_lsp_command(config) {
+///         Ok(cmd) => println!("Run: {}", cmd.program),
+///         Err(e) => eprintln!("Not found: {e}"),
+///     }
+/// }
+/// ```
+pub fn resolve_lsp_command(
     config: &LspServerConfig,
 ) -> Result<LspCommand, String> {
     let program = if config.key == "rust-analyzer" {
@@ -276,10 +350,20 @@ fn resolve_gopls_command() -> Result<String, String> {
 }
 
 /// Ensures rust-analyzer configuration directory exists on macOS.
+///
 /// Creates the configuration directory and an empty config file if they don't exist.
 /// This prevents rust-analyzer from failing on first run on macOS.
+///
+/// # Examples
+///
+/// ```no_run
+/// use iced_code_editor::ensure_rust_analyzer_config;
+///
+/// // Safe to call on any platform; no-op on non-macOS.
+/// ensure_rust_analyzer_config();
+/// ```
 #[cfg(target_os = "macos")]
-pub(crate) fn ensure_rust_analyzer_config() {
+pub fn ensure_rust_analyzer_config() {
     let Some(home) = std::env::var_os("HOME") else { return };
     let mut path = std::path::PathBuf::from(home);
     path.push("Library");
@@ -293,5 +377,14 @@ pub(crate) fn ensure_rust_analyzer_config() {
 }
 
 /// No-op on non-macOS platforms.
+///
+/// # Examples
+///
+/// ```no_run
+/// use iced_code_editor::ensure_rust_analyzer_config;
+///
+/// // Safe to call on any platform; no-op on non-macOS.
+/// ensure_rust_analyzer_config();
+/// ```
 #[cfg(not(target_os = "macos"))]
-pub(crate) fn ensure_rust_analyzer_config() {}
+pub fn ensure_rust_analyzer_config() {}

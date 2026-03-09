@@ -1,15 +1,27 @@
-// LSP (Language Server Protocol) Process Client Implementation
-// This module provides a client for communicating with LSP servers via stdio.
-// It handles document synchronization, hover requests, and completion requests.
+//! LSP (Language Server Protocol) Process Client implementation.
+//!
+//! This module provides a client for communicating with LSP servers via stdio.
+//! It handles document synchronization, hover requests, and completion requests.
+//!
+//! Enable with the `lsp-process` Cargo feature. Not available on WASM targets.
 
-// Only compile this module for non-WASM32 targets since it uses process spawning
-#![cfg(not(target_arch = "wasm32"))]
+pub mod config;
+pub mod overlay;
 
-use crate::lsp_config::{
+/// JSON-RPC method name for server-push progress notifications.
+const METHOD_PROGRESS: &str = "$/progress";
+/// JSON-RPC method name sent by the server when it creates a work-done token.
+const METHOD_WORK_DONE_PROGRESS_CREATE: &str = "window/workDoneProgress/create";
+/// Progress `kind` value that signals the end of a work-done sequence.
+const PROGRESS_KIND_END: &str = "end";
+
+use self::config::{
     LspCommand, ensure_rust_analyzer_config, lsp_server_config,
     resolve_lsp_command,
 };
-use iced_code_editor::{LspClient, LspDocument, LspPosition, LspTextChange};
+use crate::canvas_editor::lsp::{
+    LspClient, LspDocument, LspPosition, LspTextChange,
+};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -23,14 +35,16 @@ use std::thread;
 // =============================================================================
 
 /// Internal representation of a text document as a vector of lines.
-/// This is used to track document state and convert between character and byte indices.
+///
+/// Used to track document state and convert between character and byte indices.
 struct TextModel {
     /// The document content stored as a vector of lines (without newline characters)
     lines: Vec<String>,
 }
 
 impl TextModel {
-    /// Creates a new TextModel from a string.
+    /// Creates a new `TextModel` from a string.
+    ///
     /// Splits the text into lines for easier manipulation.
     /// An empty string creates a single empty line.
     fn from_text(text: &str) -> Self {
@@ -43,46 +57,35 @@ impl TextModel {
     }
 
     /// Applies a text change (edit) to the document.
+    ///
     /// Handles multi-line insertions and deletions by splicing the lines vector.
     fn apply_change(&mut self, change: &LspTextChange) {
-        // Extract the range of the change
         let start_line = change.range.start.line as usize;
         let end_line = change.range.end.line as usize;
 
-        // Validate that the range is within bounds
         if start_line >= self.lines.len() || end_line >= self.lines.len() {
             return;
         }
 
-        // Get column positions
         let start_col = change.range.start.character as usize;
         let end_col = change.range.end.character as usize;
 
-        // Convert character indices to byte indices for string slicing
         let start_byte = char_to_byte_index(&self.lines[start_line], start_col);
         let end_byte = char_to_byte_index(&self.lines[end_line], end_col);
 
-        // Extract the prefix (text before the change on the start line)
         let prefix = self.lines[start_line][..start_byte].to_string();
-        // Extract the suffix (text after the change on the end line)
         let suffix = self.lines[end_line][end_byte..].to_string();
 
-        // Split the inserted text by newlines to handle multi-line insertions
         let inserted: Vec<&str> = change.text.split('\n').collect();
         let mut replacement: Vec<String> = Vec::new();
 
         if inserted.len() == 1 {
-            // Single line insertion: combine prefix, inserted text, and suffix
             replacement.push(format!("{}{}{}", prefix, inserted[0], suffix));
         } else {
-            // Multi-line insertion:
-            // First line: prefix + first part of inserted text
             replacement.push(format!("{}{}", prefix, inserted[0]));
-            // Middle lines: inserted text as-is
             for mid in inserted.iter().take(inserted.len() - 1).skip(1) {
                 replacement.push((*mid).to_string());
             }
-            // Last line: last part of inserted text + suffix
             replacement.push(format!(
                 "{}{}",
                 inserted[inserted.len() - 1],
@@ -90,18 +93,17 @@ impl TextModel {
             ));
         }
 
-        // Replace the affected lines with the new lines
         self.lines.splice(start_line..=end_line, replacement);
     }
 
     /// Converts a UTF-8 character position to a UTF-16 position.
+    ///
     /// This is necessary because LSP uses UTF-16 for character positions.
     fn to_utf16_position(&self, position: LspPosition) -> LspPosition {
         let line_index = position.line as usize;
         let char_index = position.character as usize;
         let line = self.lines.get(line_index).map_or("", |l| l.as_str());
 
-        // Sum the UTF-16 length of each character up to the target position
         let utf16_col =
             line.chars().take(char_index).map(|c| c.len_utf16() as u32).sum();
         LspPosition { line: position.line, character: utf16_col }
@@ -109,6 +111,7 @@ impl TextModel {
 }
 
 /// Converts a character index to a byte index in a string.
+///
 /// Returns the length of the string if the index is out of bounds.
 fn char_to_byte_index(s: &str, char_index: usize) -> usize {
     s.char_indices().nth(char_index).map_or(s.len(), |(idx, _)| idx)
@@ -118,7 +121,7 @@ fn char_to_byte_index(s: &str, char_index: usize) -> usize {
 // Document State - Tracks the state of an open document
 // =============================================================================
 
-/// Represents the state of a single open document
+/// Represents the state of a single open document.
 struct DocumentState {
     /// The text content of the document
     text: TextModel,
@@ -128,13 +131,13 @@ struct DocumentState {
 // LSP Request Types
 // =============================================================================
 
-/// Enumeration of LSP request types that we track for response handling
+/// Enumeration of LSP request types that we track for response handling.
 enum LspRequestKind {
-    /// Hover request - shows type information and documentation
+    /// Hover request — shows type information and documentation
     Hover,
-    /// Completion request - provides auto-complete suggestions
+    /// Completion request — provides auto-complete suggestions
     Completion,
-    /// Definition request - go to definition
+    /// Definition request — go to definition
     Definition,
 }
 
@@ -142,32 +145,48 @@ enum LspRequestKind {
 // LSP Events - Events sent back to the main application
 // =============================================================================
 
-/// Events that can be sent from the LSP client to the application
-pub(crate) enum LspEvent {
-    /// Hover information received
+/// Events that can be sent from the LSP client to the application.
+///
+/// Receive these by polling the `mpsc::Receiver` you pass to
+/// [`LspProcessClient::new_with_server`].
+pub enum LspEvent {
+    /// Hover information received from the LSP server.
     Hover {
+        /// Markdown or plain-text hover content.
         text: String,
     },
-    /// Completion items received
+    /// Completion items received from the LSP server.
     Completion {
+        /// List of completion label strings.
         items: Vec<String>,
     },
-    /// Definition location received
+    /// Definition location received from the LSP server.
     Definition {
+        /// Target document URI.
         uri: String,
-        range: iced_code_editor::LspRange,
+        /// Target range within that document.
+        range: crate::canvas_editor::lsp::LspRange,
     },
-    /// Progress notification received
+    /// Progress notification from the LSP server.
     Progress {
+        /// Progress token identifier.
         token: String,
+        /// Key of the server that sent this notification.
         server_key: String,
+        /// Human-readable title for the progress operation.
         title: String,
+        /// Optional status message.
         message: Option<String>,
+        /// Optional percentage complete (0–100).
         percentage: Option<u32>,
+        /// `true` when this is the final progress notification.
         done: bool,
     },
+    /// Log message from the LSP server's stderr.
     Log {
+        /// Key of the server that sent this message.
         server_key: String,
+        /// The log line.
         message: String,
     },
 }
@@ -177,8 +196,26 @@ pub(crate) enum LspEvent {
 // =============================================================================
 
 /// Client for communicating with an LSP server process.
+///
 /// Manages the lifecycle of the server process and handles all communication.
-pub(crate) struct LspProcessClient {
+/// Implements [`LspClient`] so it can be plugged directly into a [`CodeEditor`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::sync::mpsc;
+/// use iced_code_editor::{LspProcessClient, LspEvent};
+///
+/// let (tx, rx) = mpsc::channel::<LspEvent>();
+/// let client = LspProcessClient::new_with_server(
+///     "file:///home/user/project",
+///     tx,
+///     "lua-language-server",
+/// );
+/// ```
+///
+/// [`CodeEditor`]: crate::CodeEditor
+pub struct LspProcessClient {
     /// The child process running the LSP server
     child: Child,
     /// Channel for sending messages to the writer thread
@@ -189,46 +226,72 @@ pub(crate) struct LspProcessClient {
     request_id: AtomicU64,
     /// Map of pending request IDs to their types (for response routing)
     pending_requests: Arc<Mutex<HashMap<u64, LspRequestKind>>>,
+    /// Handle to the writer thread (kept alive for the client's lifetime)
+    _writer_thread: thread::JoinHandle<()>,
+    /// Handle to the reader thread (kept alive for the client's lifetime)
+    _reader_thread: thread::JoinHandle<()>,
+    /// Handle to the stderr thread (kept alive for the client's lifetime)
+    _stderr_thread: thread::JoinHandle<()>,
 }
 
 impl LspProcessClient {
-    /// Creates a new LSP client with the specified server.
+    /// Creates a new LSP client connected to the specified server.
     ///
     /// # Arguments
-    /// * `root_uri` - The root URI of the workspace
-    /// * `events` - Channel to send LSP events back to the application
-    /// * `server_key` - The key identifying which LSP server to use
     ///
-    /// # Returns
-    /// A new LspProcessClient instance or an error message
-    pub(crate) fn new_with_server(
+    /// * `root_uri` — the root URI of the workspace (e.g. `"file:///home/user/project"`)
+    /// * `events` — channel to send [`LspEvent`]s back to the application
+    /// * `server_key` — key identifying the LSP server (e.g. `"lua-language-server"`)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string when the server key is not recognised, when the
+    /// server binary cannot be found, or when the process cannot be spawned.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::mpsc;
+    /// use iced_code_editor::{LspProcessClient, LspEvent};
+    ///
+    /// let (tx, _rx) = mpsc::channel::<LspEvent>();
+    /// let client = LspProcessClient::new_with_server(
+    ///     "file:///tmp/project",
+    ///     tx,
+    ///     "lua-language-server",
+    /// );
+    /// assert!(client.is_ok());
+    /// ```
+    pub fn new_with_server(
         root_uri: &str,
         events: mpsc::Sender<LspEvent>,
         server_key: &str,
     ) -> Result<Self, String> {
-        // Find the configuration for the requested server
         let config = lsp_server_config(server_key)
             .ok_or_else(|| format!("Unsupported LSP server: {}", server_key))?;
 
-        // Special handling for rust-analyzer to ensure config directory exists
         if server_key == "rust-analyzer" {
             ensure_rust_analyzer_config();
         }
 
-        // Resolve the actual command to run
         let command = resolve_lsp_command(config)?;
         Self::new_with_command(root_uri, events, &command, server_key)
     }
 
     /// Creates a new LSP client with a specific command.
+    ///
     /// This is the internal implementation that spawns the process.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the process cannot be spawned or if stdio
+    /// handles cannot be acquired.
     fn new_with_command(
         root_uri: &str,
         events: mpsc::Sender<LspEvent>,
         command: &LspCommand,
         server_key: &str,
     ) -> Result<Self, String> {
-        // Spawn the LSP server process with piped stdin/stdout
         let mut child = Command::new(&command.program)
             .args(&command.args)
             .stdin(Stdio::piped())
@@ -236,7 +299,6 @@ impl LspProcessClient {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| {
-                // Provide helpful error messages for common issues
                 if e.kind() == std::io::ErrorKind::NotFound {
                     if command.program == "rust-analyzer" {
                         "LSP server program rust-analyzer not found. Please install rust-analyzer or set RUST_ANALYZER/RUST_ANALYZER_PATH environment variable".to_string()
@@ -248,12 +310,10 @@ impl LspProcessClient {
                 }
             })?;
 
-        // Take ownership of the process's stdin and stdout
         let stdin = child.stdin.take().ok_or("stdin unavailable")?;
         let stdout = child.stdout.take().ok_or("stdout unavailable")?;
         let stderr = child.stderr.take().ok_or("stderr unavailable")?;
 
-        // Create channel for sending messages to the writer thread
         let (tx, rx) = mpsc::channel::<Vec<u8>>();
         let pending_requests = Arc::new(Mutex::new(HashMap::new()));
         let pending_reader = pending_requests.clone();
@@ -262,9 +322,8 @@ impl LspProcessClient {
         let server_key = server_key.to_string();
         let server_key_reader = server_key.clone();
         let server_key_log = server_key;
-        let tx_reader = tx.clone(); // Clone for reader thread to send responses
+        let tx_reader = tx.clone();
 
-        // Spawn the writer thread - sends messages to the LSP server
         let writer_thread = thread::spawn(move || {
             let mut input = stdin;
             for bytes in rx {
@@ -275,15 +334,12 @@ impl LspProcessClient {
             }
         });
 
-        // Spawn the reader thread - receives messages from the LSP server
         let reader_thread = thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
-                // Parse the LSP message headers
                 let mut content_length: Option<usize> = None;
                 let mut line = String::new();
 
-                // Read headers until we hit an empty line
                 loop {
                     line.clear();
                     if reader
@@ -292,15 +348,12 @@ impl LspProcessClient {
                         .filter(|n| *n > 0)
                         .is_none()
                     {
-                        // EOF or error, exit the thread
                         return;
                     }
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
-                        // Empty line signals end of headers
                         break;
                     }
-                    // Parse Content-Length header
                     if let Some(value) = trimmed.strip_prefix("Content-Length:")
                         && let Ok(len) = value.trim().parse::<usize>()
                     {
@@ -308,136 +361,43 @@ impl LspProcessClient {
                     }
                 }
 
-                // Read the message body based on Content-Length
                 let Some(len) = content_length else { continue };
                 let mut buf = vec![0u8; len];
                 if reader.read_exact(&mut buf).is_err() {
                     return;
                 }
 
-                // Parse the JSON message and handle responses
                 if let Ok(value) =
                     serde_json::from_slice::<serde_json::Value>(&buf)
                 {
-                    // Check if it's a request from the server (has id and method)
                     if let Some(id) = value.get("id").and_then(|v| v.as_u64()) {
                         if let Some(method) =
                             value.get("method").and_then(|m| m.as_str())
                         {
-                            // Handle window/workDoneProgress/create request
-                            if method == "window/workDoneProgress/create" {
-                                // We need to respond with a success result (null)
-                                let response = json!({
-                                    "jsonrpc": "2.0",
-                                    "id": id,
-                                    "result": null
-                                });
-                                if let Ok(data) = serde_json::to_vec(&response)
-                                {
-                                    let mut header = format!(
-                                        "Content-Length: {}\r\n\r\n",
-                                        data.len()
-                                    )
-                                    .into_bytes();
-                                    header.extend_from_slice(&data);
-                                    let _ = tx_reader.send(header);
-                                }
-                            }
+                            handle_server_request(id, method, &tx_reader);
                         } else {
-                            // It's a response (has id and no method)
-                            // Look up the request type for this response
-                            let kind = {
-                                let mut pending = pending_reader
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner());
-                                pending.remove(&id)
-                            };
-
-                            if let Some(kind) = kind {
-                                let result = value
-                                    .get("result")
-                                    .unwrap_or(&serde_json::Value::Null);
-                                match kind {
-                                    // Handle hover response
-                                    LspRequestKind::Hover => {
-                                        let text = parse_hover_text(result)
-                                            .unwrap_or_default();
-                                        let _ = events_reader
-                                            .send(LspEvent::Hover { text });
-                                    }
-                                    // Handle completion response
-                                    LspRequestKind::Completion => {
-                                        let items =
-                                            parse_completion_items(result);
-                                        if !items.is_empty() {
-                                            let _ = events_reader.send(
-                                                LspEvent::Completion { items },
-                                            );
-                                        }
-                                    }
-                                    // Handle definition response
-                                    LspRequestKind::Definition => {
-                                        if let Some((uri, range)) =
-                                            parse_definition_location(result)
-                                        {
-                                            let _ = events_reader.send(
-                                                LspEvent::Definition {
-                                                    uri,
-                                                    range,
-                                                },
-                                            );
-                                        }
-                                    }
-                                }
-                            }
+                            handle_client_response(
+                                id,
+                                &value,
+                                &pending_reader,
+                                &events_reader,
+                            );
                         }
                     } else if let Some(method) =
                         value.get("method").and_then(|m| m.as_str())
+                        && let Some(params) = value.get("params")
                     {
-                        // Notification from server
-                        if method == "$/progress"
-                            && let Some(params) = value.get("params")
-                            && let Some(token) =
-                                params.get("token").and_then(|t| {
-                                    t.as_str().map(String::from).or_else(|| {
-                                        t.as_i64().map(|i| i.to_string())
-                                    })
-                                })
-                            && let Some(val) = params.get("value")
-                        {
-                            let kind = val
-                                .get("kind")
-                                .and_then(|k| k.as_str())
-                                .unwrap_or("");
-                            let title = val
-                                .get("title")
-                                .and_then(|t| t.as_str())
-                                .map(String::from)
-                                .unwrap_or_default();
-                            let message = val
-                                .get("message")
-                                .and_then(|m| m.as_str())
-                                .map(String::from);
-                            let percentage = val
-                                .get("percentage")
-                                .and_then(|p| p.as_u64())
-                                .map(|p| p as u32);
-
-                            let done = kind == "end";
-
-                            let _ = events_reader.send(LspEvent::Progress {
-                                token,
-                                server_key: server_key_reader.clone(),
-                                title,
-                                message,
-                                percentage,
-                                done,
-                            });
-                        }
+                        handle_server_notification(
+                            method,
+                            params,
+                            &events_reader,
+                            &server_key_reader,
+                        );
                     }
                 }
             }
         });
+
         let stderr_thread = thread::spawn(move || {
             let reader = BufReader::new(stderr);
             for line in reader.lines() {
@@ -453,17 +413,17 @@ impl LspProcessClient {
             }
         });
 
-        // Create the client instance
         let client = Self {
             child,
             writer: tx,
             documents: Arc::new(Mutex::new(HashMap::new())),
             request_id: AtomicU64::new(1),
             pending_requests,
+            _writer_thread: writer_thread,
+            _reader_thread: reader_thread,
+            _stderr_thread: stderr_thread,
         };
 
-        // Send the initialize request to the LSP server
-        // This is the first message that must be sent to establish the connection
         let initialize = json!({
             "jsonrpc": "2.0",
             "id": client.next_id(),
@@ -488,8 +448,6 @@ impl LspProcessClient {
         });
         client.send_message(&initialize);
 
-        // Send the initialized notification
-        // This tells the server that we're ready to receive notifications
         let initialized = json!({
             "jsonrpc": "2.0",
             "method": "initialized",
@@ -497,25 +455,19 @@ impl LspProcessClient {
         });
         client.send_message(&initialized);
 
-        // Keep thread handles alive (they will be joined when dropped)
-        let _ = writer_thread;
-        let _ = reader_thread;
-        let _ = stderr_thread;
-
         Ok(client)
     }
 
-    /// Generates the next unique request ID.
-    /// Uses atomic operations for thread safety.
+    /// Generates the next unique request ID using atomic operations.
     fn next_id(&self) -> u64 {
         self.request_id.fetch_add(1, Ordering::Relaxed)
     }
 
     /// Sends a JSON-RPC message to the LSP server.
-    /// Formats the message with the required Content-Length header.
+    ///
+    /// Formats the message with the required `Content-Length` header.
     fn send_message(&self, value: &serde_json::Value) {
         if let Ok(data) = serde_json::to_vec(&value) {
-            // Build the LSP message with Content-Length header
             let mut header =
                 format!("Content-Length: {}\r\n\r\n", data.len()).into_bytes();
             header.extend_from_slice(&data);
@@ -524,6 +476,7 @@ impl LspProcessClient {
     }
 
     /// Applies text changes to a document and converts them to JSON format.
+    ///
     /// Also converts positions to UTF-16 as required by LSP.
     fn apply_change_and_convert(
         &self,
@@ -535,11 +488,9 @@ impl LspProcessClient {
         let Some(state) = docs.get_mut(uri) else { return out };
 
         for change in changes {
-            // Convert positions to UTF-16 for LSP
             let start = state.text.to_utf16_position(change.range.start);
             let end = state.text.to_utf16_position(change.range.end);
 
-            // Create the JSON representation of the change
             out.push(json!({
                 "range": {
                     "start": { "line": start.line, "character": start.character },
@@ -548,18 +499,121 @@ impl LspProcessClient {
                 "text": change.text
             }));
 
-            // Apply the change to our local copy
             state.text.apply_change(change);
         }
         out
     }
 }
 
-/// Clean up the LSP server process when the client is dropped.
-/// Sends shutdown and exit notifications, then kills the process if needed.
+// =============================================================================
+// Reader thread helper functions
+// =============================================================================
+
+/// Handles an LSP server request that requires a JSON-RPC response.
+///
+/// Currently handles `window/workDoneProgress/create` by replying with a null
+/// result. Unknown methods are silently ignored.
+fn handle_server_request(id: u64, method: &str, tx: &mpsc::Sender<Vec<u8>>) {
+    if method == METHOD_WORK_DONE_PROGRESS_CREATE {
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": null
+        });
+        if let Ok(data) = serde_json::to_vec(&response) {
+            let mut header =
+                format!("Content-Length: {}\r\n\r\n", data.len()).into_bytes();
+            header.extend_from_slice(&data);
+            let _ = tx.send(header);
+        }
+    }
+}
+
+/// Dispatches a server response to the appropriate pending request handler.
+///
+/// Looks up the request kind by `id`, parses the result, and emits a
+/// [`LspEvent::Hover`], [`LspEvent::Completion`], or [`LspEvent::Definition`].
+fn handle_client_response(
+    id: u64,
+    value: &serde_json::Value,
+    pending: &Arc<Mutex<HashMap<u64, LspRequestKind>>>,
+    events: &mpsc::Sender<LspEvent>,
+) {
+    let kind = {
+        let mut map = pending.lock().unwrap_or_else(|e| e.into_inner());
+        map.remove(&id)
+    };
+
+    let Some(kind) = kind else { return };
+    let result = value.get("result").unwrap_or(&serde_json::Value::Null);
+
+    match kind {
+        LspRequestKind::Hover => {
+            let text = parse_hover_text(result).unwrap_or_default();
+            let _ = events.send(LspEvent::Hover { text });
+        }
+        LspRequestKind::Completion => {
+            let items = parse_completion_items(result);
+            if !items.is_empty() {
+                let _ = events.send(LspEvent::Completion { items });
+            }
+        }
+        LspRequestKind::Definition => {
+            if let Some((uri, range)) = parse_definition_location(result) {
+                let _ = events.send(LspEvent::Definition { uri, range });
+            }
+        }
+    }
+}
+
+/// Handles a server-initiated notification (e.g. `$/progress`).
+///
+/// Parses the progress payload and emits a [`LspEvent::Progress`].
+/// Notifications for unknown methods are silently ignored.
+fn handle_server_notification(
+    method: &str,
+    params: &serde_json::Value,
+    events: &mpsc::Sender<LspEvent>,
+    server_key: &str,
+) {
+    if method != METHOD_PROGRESS {
+        return;
+    }
+
+    let Some(token) = params.get("token").and_then(|t| {
+        t.as_str()
+            .map(String::from)
+            .or_else(|| t.as_i64().map(|i| i.to_string()))
+    }) else {
+        return;
+    };
+
+    let Some(val) = params.get("value") else { return };
+
+    let kind = val.get("kind").and_then(|k| k.as_str()).unwrap_or("");
+    let title = val
+        .get("title")
+        .and_then(|t| t.as_str())
+        .map(String::from)
+        .unwrap_or_default();
+    let message = val.get("message").and_then(|m| m.as_str()).map(String::from);
+    let percentage =
+        val.get("percentage").and_then(|p| p.as_u64()).map(|p| p as u32);
+    let done = kind == PROGRESS_KIND_END;
+
+    let _ = events.send(LspEvent::Progress {
+        token,
+        server_key: server_key.to_string(),
+        title,
+        message,
+        percentage,
+        done,
+    });
+}
+
+/// Sends shutdown/exit notifications and kills the process on drop.
 impl Drop for LspProcessClient {
     fn drop(&mut self) {
-        // Send the shutdown request
         let shutdown = json!({
             "jsonrpc": "2.0",
             "id": self.next_id(),
@@ -568,7 +622,6 @@ impl Drop for LspProcessClient {
         });
         self.send_message(&shutdown);
 
-        // Send the exit notification
         let exit = json!({
             "jsonrpc": "2.0",
             "method": "exit",
@@ -576,7 +629,6 @@ impl Drop for LspProcessClient {
         });
         self.send_message(&exit);
 
-        // Kill the process if it's still running
         if self.child.try_wait().ok().flatten().is_none() {
             let _ = self.child.kill();
         }
@@ -594,43 +646,35 @@ fn parse_hover_text(result: &serde_json::Value) -> Option<String> {
 }
 
 /// Recursively extracts hover text from various content formats.
-/// Handles strings, arrays, and objects with a "value" field.
+///
+/// Handles strings, arrays, and objects with a `"value"` field.
 fn hover_text_from_contents(value: &serde_json::Value) -> Option<String> {
     match value {
-        // Simple string content
         serde_json::Value::String(text) => Some(text.clone()),
-
-        // Array of content items - combine with newlines
         serde_json::Value::Array(items) => {
             let parts: Vec<String> =
                 items.iter().filter_map(hover_text_from_contents).collect();
             if parts.is_empty() { None } else { Some(parts.join("\n")) }
         }
-
-        // Object with "value" field (e.g., MarkupContent)
         serde_json::Value::Object(map) => {
             map.get("value").and_then(|v| v.as_str()).map(String::from)
         }
-
-        // Other types are not supported
         _ => None,
     }
 }
 
 /// Parses completion items from an LSP completion response.
-/// Handles both array responses and object responses with "items" field.
+///
+/// Handles both array responses and object responses with an `"items"` field.
 fn parse_completion_items(result: &serde_json::Value) -> Vec<String> {
     let mut items = Vec::new();
 
-    // Check if result is directly an array of CompletionItem
     if let Some(array) = result.as_array() {
         items.extend(array.iter());
-    // Check if result is a CompletionList with an "items" array
     } else if let Some(array) = result.get("items").and_then(|v| v.as_array()) {
         items.extend(array.iter());
     }
 
-    // Extract the "label" field from each completion item
     items
         .iter()
         .filter_map(|item| item.get("label").and_then(|v| v.as_str()))
@@ -639,44 +683,43 @@ fn parse_completion_items(result: &serde_json::Value) -> Vec<String> {
 }
 
 /// Parses definition location from an LSP definition response.
-/// Handles Location, Location[], and LocationLink[] responses.
+///
+/// Handles `Location`, `Location[]`, and `LocationLink[]` responses.
 fn parse_definition_location(
     result: &serde_json::Value,
-) -> Option<(String, iced_code_editor::LspRange)> {
-    // Helper to extract uri and range from a Location object
+) -> Option<(String, crate::canvas_editor::lsp::LspRange)> {
     fn extract_location(
         loc: &serde_json::Value,
-    ) -> Option<(String, iced_code_editor::LspRange)> {
+    ) -> Option<(String, crate::canvas_editor::lsp::LspRange)> {
         let uri = loc.get("uri")?.as_str()?.to_string();
         let range_val = loc.get("range")?;
 
         let start = range_val.get("start")?;
         let end = range_val.get("end")?;
 
-        let start_line = start.get("line")?.as_u64()? as usize;
-        let start_char = start.get("character")?.as_u64()? as usize;
-        let end_line = end.get("line")?.as_u64()? as usize;
-        let end_char = end.get("character")?.as_u64()? as usize;
+        let start_line = start.get("line")?.as_u64()? as u32;
+        let start_char = start.get("character")?.as_u64()? as u32;
+        let end_line = end.get("line")?.as_u64()? as u32;
+        let end_char = end.get("character")?.as_u64()? as u32;
 
         Some((
             uri,
-            iced_code_editor::LspRange {
-                start: iced_code_editor::LspPosition {
-                    line: start_line as u32,
-                    character: start_char as u32,
+            crate::canvas_editor::lsp::LspRange {
+                start: crate::canvas_editor::lsp::LspPosition {
+                    line: start_line,
+                    character: start_char,
                 },
-                end: iced_code_editor::LspPosition {
-                    line: end_line as u32,
-                    character: end_char as u32,
+                end: crate::canvas_editor::lsp::LspPosition {
+                    line: end_line,
+                    character: end_char,
                 },
             },
         ))
     }
 
-    // Helper to extract uri and range from a LocationLink object
     fn extract_link(
         link: &serde_json::Value,
-    ) -> Option<(String, iced_code_editor::LspRange)> {
+    ) -> Option<(String, crate::canvas_editor::lsp::LspRange)> {
         let uri = link.get("targetUri")?.as_str()?.to_string();
         let range_val =
             link.get("targetSelectionRange").or(link.get("targetRange"))?;
@@ -684,21 +727,21 @@ fn parse_definition_location(
         let start = range_val.get("start")?;
         let end = range_val.get("end")?;
 
-        let start_line = start.get("line")?.as_u64()? as usize;
-        let start_char = start.get("character")?.as_u64()? as usize;
-        let end_line = end.get("line")?.as_u64()? as usize;
-        let end_char = end.get("character")?.as_u64()? as usize;
+        let start_line = start.get("line")?.as_u64()? as u32;
+        let start_char = start.get("character")?.as_u64()? as u32;
+        let end_line = end.get("line")?.as_u64()? as u32;
+        let end_char = end.get("character")?.as_u64()? as u32;
 
         Some((
             uri,
-            iced_code_editor::LspRange {
-                start: iced_code_editor::LspPosition {
-                    line: start_line as u32,
-                    character: start_char as u32,
+            crate::canvas_editor::lsp::LspRange {
+                start: crate::canvas_editor::lsp::LspPosition {
+                    line: start_line,
+                    character: start_char,
                 },
-                end: iced_code_editor::LspPosition {
-                    line: end_line as u32,
-                    character: end_char as u32,
+                end: crate::canvas_editor::lsp::LspPosition {
+                    line: end_line,
+                    character: end_char,
                 },
             },
         ))
@@ -706,7 +749,6 @@ fn parse_definition_location(
 
     if let Some(array) = result.as_array() {
         if let Some(first) = array.first() {
-            // Check if it's a LocationLink (has targetUri) or Location (has uri)
             if first.get("targetUri").is_some() {
                 extract_link(first)
             } else {
@@ -726,20 +768,14 @@ fn parse_definition_location(
 // LspClient Trait Implementation
 // =============================================================================
 
-/// Implementation of the LspClient trait for the process-based client.
-/// This is the main interface used by the code editor to communicate with LSP servers.
 impl LspClient for LspProcessClient {
-    /// Called when a document is opened in the editor.
-    /// Sends the textDocument/didOpen notification to the LSP server.
     fn did_open(&mut self, document: &LspDocument, text: &str) {
-        // Store the document state locally for position conversions
         let mut docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         docs.insert(
             document.uri.clone(),
             DocumentState { text: TextModel::from_text(text) },
         );
 
-        // Send the didOpen notification
         let msg = json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didOpen",
@@ -755,21 +791,17 @@ impl LspClient for LspProcessClient {
         self.send_message(&msg);
     }
 
-    /// Called when a document is modified in the editor.
-    /// Sends the textDocument/didChange notification to the LSP server.
     fn did_change(
         &mut self,
         document: &LspDocument,
         changes: &[LspTextChange],
     ) {
-        // Apply changes and convert to LSP format
         let content_changes =
             self.apply_change_and_convert(&document.uri, changes);
         if content_changes.is_empty() {
             return;
         }
 
-        // Send the didChange notification
         let msg = json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didChange",
@@ -784,8 +816,6 @@ impl LspClient for LspProcessClient {
         self.send_message(&msg);
     }
 
-    /// Called when a document is saved in the editor.
-    /// Sends the textDocument/didSave notification to the LSP server.
     fn did_save(&mut self, document: &LspDocument, text: &str) {
         let msg = json!({
             "jsonrpc": "2.0",
@@ -798,14 +828,10 @@ impl LspClient for LspProcessClient {
         self.send_message(&msg);
     }
 
-    /// Called when a document is closed in the editor.
-    /// Sends the textDocument/didClose notification and removes local state.
     fn did_close(&mut self, document: &LspDocument) {
-        // Remove the document from local state
         let mut docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         docs.remove(&document.uri);
 
-        // Send the didClose notification
         let msg = json!({
             "jsonrpc": "2.0",
             "method": "textDocument/didClose",
@@ -816,15 +842,11 @@ impl LspClient for LspProcessClient {
         self.send_message(&msg);
     }
 
-    /// Requests hover information at a specific position.
-    /// The response will be sent as an LspEvent::Hover via the events channel.
     fn request_hover(&mut self, document: &LspDocument, position: LspPosition) {
-        // Get the document state and convert position to UTF-16
         let docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         let Some(state) = docs.get(&document.uri) else { return };
         let pos = state.text.to_utf16_position(position);
 
-        // Generate a request ID and track it
         let id = self.next_id();
         {
             let mut pending =
@@ -832,7 +854,6 @@ impl LspClient for LspProcessClient {
             pending.insert(id, LspRequestKind::Hover);
         }
 
-        // Send the hover request
         let msg = json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -845,19 +866,15 @@ impl LspClient for LspProcessClient {
         self.send_message(&msg);
     }
 
-    /// Requests completion items at a specific position.
-    /// The response will be sent as an LspEvent::Completion via the events channel.
     fn request_completion(
         &mut self,
         document: &LspDocument,
         position: LspPosition,
     ) {
-        // Get the document state and convert position to UTF-16
         let docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         let Some(state) = docs.get(&document.uri) else { return };
         let pos = state.text.to_utf16_position(position);
 
-        // Generate a request ID and track it
         let id = self.next_id();
         {
             let mut pending =
@@ -865,7 +882,6 @@ impl LspClient for LspProcessClient {
             pending.insert(id, LspRequestKind::Completion);
         }
 
-        // Send the completion request
         let msg = json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -873,25 +889,21 @@ impl LspClient for LspProcessClient {
             "params": {
                 "textDocument": { "uri": document.uri },
                 "position": { "line": pos.line, "character": pos.character },
-                "context": { "triggerKind": 1 }  // Invoked = 1
+                "context": { "triggerKind": 1 }
             }
         });
         self.send_message(&msg);
     }
 
-    /// Requests definition at a specific position.
-    /// The response will be sent as an LspEvent::Definition via the events channel.
     fn request_definition(
         &mut self,
         document: &LspDocument,
         position: LspPosition,
     ) {
-        // Get the document state and convert position to UTF-16
         let docs = self.documents.lock().unwrap_or_else(|e| e.into_inner());
         let Some(state) = docs.get(&document.uri) else { return };
         let pos = state.text.to_utf16_position(position);
 
-        // Generate a request ID and track it
         let id = self.next_id();
         {
             let mut pending =
@@ -899,7 +911,6 @@ impl LspClient for LspProcessClient {
             pending.insert(id, LspRequestKind::Definition);
         }
 
-        // Send the definition request
         let msg = json!({
             "jsonrpc": "2.0",
             "id": id,
@@ -910,5 +921,195 @@ impl LspClient for LspProcessClient {
             }
         });
         self.send_message(&msg);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Returns a `Content-Length`-framed JSON string from raw bytes sent on the channel.
+    fn decode_sent(data: Vec<u8>) -> serde_json::Value {
+        let header_end = data
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("missing header separator");
+        let body = &data[header_end + 4..];
+        serde_json::from_slice(body).expect("invalid JSON body")
+    }
+
+    // -------------------------------------------------------------------------
+    // handle_server_request
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_handle_server_request_work_done_progress_create() {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        handle_server_request(42, METHOD_WORK_DONE_PROGRESS_CREATE, &tx);
+
+        let bytes = rx.try_recv().expect("expected a response on the channel");
+        let value = decode_sent(bytes);
+        assert_eq!(value["id"], 42);
+        assert_eq!(value["jsonrpc"], "2.0");
+        assert!(value["result"].is_null());
+    }
+
+    #[test]
+    fn test_handle_server_request_unknown_method_ignored() {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        handle_server_request(1, "unknown/method", &tx);
+        assert!(
+            rx.try_recv().is_err(),
+            "unknown methods must not send a reply"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // handle_client_response
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_handle_client_response_hover() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(1u64, LspRequestKind::Hover);
+
+        let value = serde_json::json!({
+            "id": 1,
+            "result": { "contents": { "value": "hover info" } }
+        });
+        handle_client_response(1, &value, &pending, &events_tx);
+
+        match events_rx.try_recv().expect("expected a Hover event") {
+            LspEvent::Hover { text } => assert_eq!(text, "hover info"),
+            _ => panic!("expected LspEvent::Hover"),
+        }
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_handle_client_response_completion() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(2u64, LspRequestKind::Completion);
+
+        let value = serde_json::json!({
+            "id": 2,
+            "result": { "items": [{ "label": "foo" }, { "label": "bar" }] }
+        });
+        handle_client_response(2, &value, &pending, &events_tx);
+
+        match events_rx.try_recv().expect("expected a Completion event") {
+            LspEvent::Completion { items } => {
+                assert_eq!(items, vec!["foo", "bar"]);
+            }
+            _ => panic!("expected LspEvent::Completion"),
+        }
+    }
+
+    #[test]
+    fn test_handle_client_response_definition() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+        pending.lock().unwrap().insert(3u64, LspRequestKind::Definition);
+
+        let value = serde_json::json!({
+            "id": 3,
+            "result": {
+                "uri": "file:///foo/bar.rs",
+                "range": {
+                    "start": { "line": 0, "character": 0 },
+                    "end": { "line": 0, "character": 5 }
+                }
+            }
+        });
+        handle_client_response(3, &value, &pending, &events_tx);
+
+        match events_rx.try_recv().expect("expected a Definition event") {
+            LspEvent::Definition { uri, .. } => {
+                assert_eq!(uri, "file:///foo/bar.rs");
+            }
+            _ => panic!("expected LspEvent::Definition"),
+        }
+    }
+
+    #[test]
+    fn test_handle_client_response_unknown_id_ignored() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let pending = Arc::new(Mutex::new(HashMap::new()));
+
+        let value = serde_json::json!({ "id": 99, "result": null });
+        handle_client_response(99, &value, &pending, &events_tx);
+        assert!(
+            events_rx.try_recv().is_err(),
+            "unknown IDs must not emit events"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // handle_server_notification
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn test_handle_server_notification_progress_done() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let params = serde_json::json!({
+            "token": "my-token",
+            "value": {
+                "kind": "end",
+                "title": "Indexing",
+                "message": "done"
+            }
+        });
+
+        handle_server_notification(
+            METHOD_PROGRESS,
+            &params,
+            &events_tx,
+            "lua-ls",
+        );
+
+        match events_rx.try_recv().expect("expected a Progress event") {
+            LspEvent::Progress { token, done, server_key, .. } => {
+                assert_eq!(token, "my-token");
+                assert!(done);
+                assert_eq!(server_key, "lua-ls");
+            }
+            _ => panic!("expected LspEvent::Progress"),
+        }
+    }
+
+    #[test]
+    fn test_handle_server_notification_progress_not_done() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let params = serde_json::json!({
+            "token": "tok",
+            "value": { "kind": "report", "title": "Building" }
+        });
+
+        handle_server_notification(
+            METHOD_PROGRESS,
+            &params,
+            &events_tx,
+            "rust-analyzer",
+        );
+
+        match events_rx.try_recv().expect("expected a Progress event") {
+            LspEvent::Progress { done, .. } => assert!(!done),
+            _ => panic!("expected LspEvent::Progress"),
+        }
+    }
+
+    #[test]
+    fn test_handle_server_notification_unknown_method_ignored() {
+        let (events_tx, events_rx) = mpsc::channel::<LspEvent>();
+        let params = serde_json::json!({});
+        handle_server_notification(
+            "$/somethingElse",
+            &params,
+            &events_tx,
+            "server",
+        );
+        assert!(events_rx.try_recv().is_err());
     }
 }

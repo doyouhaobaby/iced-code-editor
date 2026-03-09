@@ -12,6 +12,9 @@ readme = "../README.md"
 keywords = ["gui", "interface", "widgets", "iced", "editor"]
 categories = ["gui"]
 
+[features]
+lsp-process = ["dep:serde_json"]
+
 [dependencies]
 iced.workspace = true
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
@@ -20,6 +23,7 @@ iced_font_awesome = "0.4"
 iced_aw = "0.13"
 rust-i18n = "3"
 unicode-width = "0.2.2"
+serde_json = { version = "1", optional = true }
 
 [package.metadata.docs.rs]
 all-features = true

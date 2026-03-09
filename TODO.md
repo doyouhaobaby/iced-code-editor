@@ -10,8 +10,6 @@ None
 
 ## Features
 
-feat: handle horizontal scrolling when line wrapping is disabled #13
-
 1. **Multiple cursors**
 
    - Simultaneous editing at multiple positions
@@ -26,11 +24,6 @@ feat: handle horizontal scrolling when line wrapping is disabled #13
 
    - Overview of entire file
    - Clickable navigation
-
-4. **Auto-completion**
-
-   - LSP integration
-   - Context-aware suggestions
 
 ## Performance Improvements
 

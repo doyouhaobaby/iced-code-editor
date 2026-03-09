@@ -21,33 +21,39 @@
    - [Scroll-to-Cursor](#scroll-to-cursor)
    - [Internationalization (i18n)](#internationalization-i18n)
    - [CJK and Asian Character Support](#cjk-and-asian-character-support)
-5. [Performance Considerations](#performance-considerations)
+5. [Language Server Protocol (LSP) Support](#language-server-protocol-lsp-support)
+   - [Architecture](#architecture-1)
+   - [Layer 1 — LspClient trait](#layer-1--lspclient-trait-canvas_editorlsprs)
+   - [Layer 2 — LspProcessClient](#layer-2--lspprocessclient-canvas_editorlsp_processmodrs)
+   - [Layer 3 — LspOverlayState + view_lsp_overlay](#layer-3--lspoverlaystate--view_lsp_overlay-canvas_editorlsp_processoverlayrs)
+   - [Event flow](#event-flow)
+6. [Performance Considerations](#performance-considerations)
    - [Canvas Caching](#1-canvas-caching)
    - [Syntax Highlighting Optimization](#2-syntax-highlighting-optimization)
    - [Text Buffer Performance](#3-text-buffer-performance)
    - [Memory Usage](#4-memory-usage)
    - [CJK Character Width Calculation](#5-cjk-character-width-calculation)
-6. [Testing Strategy](#testing-strategy)
+7. [Testing Strategy](#testing-strategy)
    - [Unit Tests](#unit-tests)
    - [Integration Tests](#integration-tests)
    - [Running Tests](#running-tests)
-7. [Common Pitfalls](#common-pitfalls)
+8. [Common Pitfalls](#common-pitfalls)
    - [UTF-8 Character Boundaries](#1-utf-8-character-boundaries)
    - [Cache Invalidation](#2-cache-invalidation)
    - [Command History Grouping](#3-command-history-grouping)
    - [Selection Direction](#4-selection-direction)
-8. [Future Enhancements](#future-enhancements)
-9. [Contributing Guidelines](#contributing-guidelines)
-   - [Code Style](#code-style)
-   - [Pull Request Process](#pull-request-process)
-   - [Commit Messages](#commit-messages)
-   - [Documentation](#documentation)
-10. [Resources](#resources)
+9. [Future Enhancements](#future-enhancements)
+10. [Contributing Guidelines](#contributing-guidelines)
+    - [Code Style](#code-style)
+    - [Pull Request Process](#pull-request-process)
+    - [Commit Messages](#commit-messages)
+    - [Documentation](#documentation)
+11. [Resources](#resources)
     - [Iced Framework](#iced-framework)
     - [Syntax Highlighting](#syntax-highlighting-1)
     - [Design Patterns](#design-patterns-1)
     - [Text Editor Algorithms](#text-editor-algorithms)
-11. [License](#license)
+12. [License](#license)
 
 ## Overview
 
@@ -741,6 +747,124 @@ All text operations properly handle UTF-8 character boundaries to prevent panics
 - Syntax highlighting → segment positioning
 - Horizontal scrolling → viewport calculations
 - Find/replace → match highlighting
+
+## Language Server Protocol (LSP) Support
+
+**Feature gate:** `lsp-process` (not available on WASM)
+
+**Location:** `canvas_editor/lsp.rs`, `canvas_editor/lsp_process/`
+
+### Architecture
+
+The LSP integration is split into three layers:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Application (demo-app)                             │
+│  ┌──────────────┐  ┌────────────────────────────┐  │
+│  │ app_lsp.rs   │  │ ui/lsp.rs                  │  │
+│  │ timers/events│  │ view_lsp_overlay() wrapper  │  │
+│  └──────┬───────┘  └─────────────┬──────────────┘  │
+└─────────│─────────────────────────│─────────────────┘
+          │                         │
+┌─────────│─────────────────────────│─────────────────┐
+│  Library (iced-code-editor)       │                  │
+│  ┌──────▼───────┐  ┌─────────────▼──────────────┐  │
+│  │ LspClient    │  │ LspOverlayState             │  │
+│  │ (trait)      │  │ + view_lsp_overlay()        │  │
+│  └──────┬───────┘  └────────────────────────────┘  │
+│  ┌──────▼───────┐                                   │
+│  │LspProcessClient│ (lsp_process/mod.rs)            │
+│  │ stdio subprocess│                                │
+│  └──────────────┘                                   │
+└─────────────────────────────────────────────────────┘
+```
+
+### Layer 1 — `LspClient` trait (`canvas_editor/lsp.rs`)
+
+The `LspClient` trait decouples the editor from any particular LSP transport:
+
+```rust
+pub trait LspClient {
+    fn did_open(&mut self, document: &LspDocument, text: &str);
+    fn did_change(&mut self, document: &LspDocument, changes: &[LspTextChange]);
+    fn did_save(&mut self, document: &LspDocument, text: &str);
+    fn did_close(&mut self, document: &LspDocument);
+    fn request_hover(&mut self, document: &LspDocument, position: LspPosition);
+    fn request_completion(&mut self, document: &LspDocument, position: LspPosition);
+    fn request_definition(&mut self, document: &LspDocument, position: LspPosition);
+}
+```
+
+`CodeEditor` holds an `Option<Box<dyn LspClient>>` and calls the trait methods automatically when the document changes or the user requests hover/completion.
+
+### Layer 2 — `LspProcessClient` (`canvas_editor/lsp_process/mod.rs`)
+
+The concrete implementation communicates with an LSP server subprocess via **stdin/stdout** using the JSON-RPC framing of the Language Server Protocol:
+
+- **Writer thread** — serialises requests and writes them to stdin
+- **Reader thread** — reads and parses server responses, routes them by request ID
+- **Stderr thread** — forwards server log lines as `LspEvent::Log`
+
+All three `JoinHandle`s are stored as `_writer_thread`, `_reader_thread`, and `_stderr_thread` fields on `LspProcessClient`, so the threads are never detached. The `Drop` implementation sends LSP `shutdown` / `exit` notifications, then kills the child process; the threads terminate naturally when their I/O streams reach EOF.
+
+Events are sent back to the application through an `mpsc::Sender<LspEvent>`:
+
+```rust
+pub enum LspEvent {
+    Hover { text: String },
+    Completion { items: Vec<String> },
+    Definition { uri: String, range: LspRange },
+    Progress { token, server_key, title, message, percentage, done },
+    Log { server_key, message },
+}
+```
+
+Server configurations (command, arguments, language IDs) live in `lsp_process/config.rs` and are keyed by a short string such as `"lua-language-server"` or `"rust-analyzer"`.
+
+**UTF-16 conversion:** LSP uses UTF-16 character offsets while the editor works in UTF-8. `TextModel` inside `LspProcessClient` mirrors the document content and converts positions before every request.
+
+### Layer 3 — `LspOverlayState` + `view_lsp_overlay` (`canvas_editor/lsp_process/overlay.rs`)
+
+All display-related state is aggregated in `LspOverlayState`:
+
+| Field | Role |
+|---|---|
+| `hover_text` / `hover_items` | Raw text + parsed markdown for the tooltip |
+| `hover_visible` / `hover_position` | Tooltip visibility and anchor point |
+| `hover_interactive` | True while the mouse is over the tooltip (prevents auto-hide) |
+| `all_completions` / `completion_filter` | Full list + current filter string |
+| `completion_items` | Filtered items actually displayed |
+| `completion_visible` / `completion_selected` | Menu visibility and keyboard selection |
+| `completion_suppressed` | Prevents re-showing after an item is applied |
+| `completion_position` | Anchor point for the menu |
+
+`view_lsp_overlay()` is a generic function parameterised over the application message type `M`. It takes a mapping function `f: impl Fn(LspOverlayMessage) -> M` and renders a `stack![]` of three layers:
+
+1. **Base** — fills the editor viewport
+2. **Completion layer** — scrollable item list, positioned above or below the cursor
+3. **Hover layer** — scrollable markdown tooltip, positioned left or right of the token
+
+Both overlays compute their position at render time from editor viewport measurements (`viewport_width`, `viewport_height`, `viewport_scroll`, `char_width`).
+
+### Event flow
+
+```
+User moves mouse  →  CodeEditor emits MouseHover(point)
+                  →  App calls editor.lsp_hover_anchor_at_point()
+                  →  LspHoverPending queued (`LSP_HOVER_REQUEST_DELAY_MS` delay)
+                  →  Tick fires: editor.lsp_request_hover_at_position()
+                  →  LspProcessClient sends hover request to server
+                  →  Server replies → LspEvent::Hover { text }
+                  →  App calls overlay.show_hover(text)
+                  →  view_lsp_overlay() renders the tooltip
+
+User types char   →  CodeEditor emits CharacterInput
+                  →  LspProcessClient sends didChange
+                  →  Server replies → LspEvent::Completion { items }
+                  →  App calls overlay.set_completions(items, cursor_pos)
+                  →  view_lsp_overlay() renders the completion menu
+```
 
 ## Performance Considerations
 

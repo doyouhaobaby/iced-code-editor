@@ -39,6 +39,8 @@ mod cursor;
 pub mod history;
 pub mod ime_requester;
 pub mod lsp;
+#[cfg(all(feature = "lsp-process", not(target_arch = "wasm32")))]
+pub mod lsp_process;
 mod search;
 mod search_dialog;
 mod selection;
@@ -217,6 +219,8 @@ pub struct CodeEditor {
     pub(crate) search_replace_enabled: bool,
     /// Whether line numbers are displayed
     pub(crate) line_numbers_enabled: bool,
+    /// Whether LSP support is enabled
+    pub(crate) lsp_enabled: bool,
     /// Active LSP client connection, if configured.
     pub(crate) lsp_client: Option<Box<dyn lsp::LspClient>>,
     /// Metadata for the currently open LSP document.
@@ -449,6 +453,7 @@ impl CodeEditor {
             translations: Translations::default(),
             search_replace_enabled: true,
             line_numbers_enabled: true,
+            lsp_enabled: true,
             lsp_client: None,
             lsp_document: None,
             lsp_pending_changes: Vec::new(),
@@ -722,6 +727,9 @@ impl CodeEditor {
         mut client: Box<dyn lsp::LspClient>,
         mut document: lsp::LspDocument,
     ) {
+        if !self.lsp_enabled {
+            return;
+        }
         document.version = 1;
         let text = self.buffer.to_string();
         client.did_open(&document, &text);
@@ -1219,6 +1227,50 @@ impl CodeEditor {
     /// `true` if search/replace is enabled, `false` otherwise
     pub fn search_replace_enabled(&self) -> bool {
         self.search_replace_enabled
+    }
+
+    /// Sets whether LSP support is enabled.
+    ///
+    /// When set to `false`, any attached LSP client is detached automatically.
+    /// Calling [`attach_lsp`] while disabled is a no-op.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let mut editor = CodeEditor::new("fn main() {}", "rs");
+    /// editor.set_lsp_enabled(false);
+    /// ```
+    ///
+    /// [`attach_lsp`]: CodeEditor::attach_lsp
+    pub fn set_lsp_enabled(&mut self, enabled: bool) {
+        self.lsp_enabled = enabled;
+        if !enabled {
+            self.detach_lsp();
+        }
+    }
+
+    /// Returns whether LSP support is enabled.
+    ///
+    /// `true` if LSP is enabled, `false` otherwise
+    pub fn lsp_enabled(&self) -> bool {
+        self.lsp_enabled
+    }
+
+    /// Returns the syntax highlighting language identifier for this editor.
+    ///
+    /// This is the language key passed at construction (e.g., `"lua"`, `"rs"`, `"py"`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    /// let editor = CodeEditor::new("fn main() {}", "rs");
+    /// assert_eq!(editor.syntax(), "rs");
+    /// ```
+    pub fn syntax(&self) -> &str {
+        &self.syntax
     }
 
     /// Opens the search dialog programmatically.
@@ -1958,5 +2010,11 @@ mod tests {
             w3 > w1,
             "After revision bump with longer content, width should increase"
         );
+    }
+
+    #[test]
+    fn test_syntax_getter() {
+        let editor = CodeEditor::new("", "lua");
+        assert_eq!(editor.syntax(), "lua");
     }
 }

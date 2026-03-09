@@ -1,16 +1,32 @@
 // Imports for LSP (Language Server Protocol) functionality
 use super::{DemoApp, EditorId, LspProgress, Template};
 use crate::app::Message;
-use crate::lsp_config::{
-    LspLanguage, lsp_language_for_path, lsp_language_for_template,
-};
-use crate::lsp_process_client::{LspEvent, LspProcessClient};
+
+/// Delay in milliseconds before a hover request is sent after the cursor stops.
+const LSP_HOVER_REQUEST_DELAY_MS: u64 = 400;
 use iced::Point;
 use iced::Task;
-use iced_code_editor::{LspDocument, LspPosition, Message as EditorMessage};
+use iced::widget::Id;
+use iced::widget::operation::scroll_to;
+use iced::widget::scrollable;
+use iced_code_editor::{
+    LspDocument, LspEvent, LspLanguage, LspPosition, LspProcessClient,
+    Message as EditorMessage, lsp_language_for_extension,
+    lsp_language_for_path,
+};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+/// Returns the LSP language for a built-in template (all use Lua).
+fn lsp_language_for_template(template: Template) -> Option<LspLanguage> {
+    lsp_language_for_extension(match template {
+        Template::Empty
+        | Template::HelloWorld
+        | Template::Fibonacci
+        | Template::Factorial => "lua",
+    })
+}
 
 /// Represents a pending hover request that is waiting to be processed
 #[derive(Clone, Copy)]
@@ -80,26 +96,6 @@ impl DemoApp {
                 "INFO",
                 &format!("Applied completion: {}", completion_text),
             );
-        }
-    }
-
-    /// Filters the completion list based on the current input
-    pub(super) fn filter_completions(&mut self) {
-        let filter = self.lsp_completion_filter.to_lowercase();
-        if filter.is_empty() {
-            self.lsp_last_completion = self.lsp_all_completions.clone();
-        } else {
-            self.lsp_last_completion = self
-                .lsp_all_completions
-                .iter()
-                .filter(|item| item.to_lowercase().contains(&filter))
-                .cloned()
-                .collect();
-        }
-        self.lsp_completion_visible = !self.lsp_last_completion.is_empty();
-        if self.lsp_completion_selected >= self.lsp_last_completion.len() {
-            self.lsp_completion_selected =
-                self.lsp_last_completion.len().saturating_sub(1);
         }
     }
 
@@ -202,6 +198,42 @@ impl DemoApp {
         self.sync_lsp_for_language(editor_id, language, uri, None)
     }
 
+    /// Synchronizes LSP for the given editor, using its file path or syntax.
+    ///
+    /// - If the tab has a `file_path`, delegates to [`sync_lsp_for_path`].
+    /// - If the tab is untitled, detects the language from the editor's syntax
+    ///   and uses a virtual URI of the form `untitled://{id}/untitled.{syntax}`.
+    ///
+    /// Returns `true` if an LSP server was successfully attached.
+    ///
+    /// [`sync_lsp_for_path`]: Self::sync_lsp_for_path
+    pub(super) fn sync_lsp_for_editor(&mut self, editor_id: EditorId) -> bool {
+        let file_path =
+            self.get_tab(editor_id).and_then(|tab| tab.file_path.clone());
+
+        if let Some(path) = file_path {
+            return self.sync_lsp_for_path(editor_id, &path);
+        }
+
+        let syntax = self.get_editor(editor_id).map(|e| e.syntax().to_string());
+
+        let Some(syntax) = syntax else {
+            return false;
+        };
+
+        let Some(language) = lsp_language_for_extension(&syntax) else {
+            self.detach_lsp_for_editor(editor_id);
+            return false;
+        };
+
+        let uri = format!(
+            "untitled://{}/untitled.{}",
+            editor_id_label(editor_id),
+            syntax
+        );
+        self.sync_lsp_for_language(editor_id, language, uri, None)
+    }
+
     /// Synchronizes LSP for a specific language
     /// Reuses existing LSP server if compatible, otherwise creates a new one
     pub(super) fn sync_lsp_for_language(
@@ -269,19 +301,20 @@ impl DemoApp {
         }
     }
 
-    /// Handles mouse-triggered hover requests
-    /// Implements hover delay and interactive hover dismissal logic
+    /// Handles mouse-triggered hover requests.
+    ///
+    /// Implements hover delay and interactive hover dismissal logic.
     pub(super) fn handle_lsp_hover_from_mouse(
         &mut self,
         editor_id: EditorId,
         point: Point,
     ) {
         // If hover is interactive (mouse is over the tooltip), check if we should dismiss
-        if self.lsp_hover_interactive {
-            if !self.lsp_hover_visible
+        if self.lsp_overlay.hover_interactive {
+            if !self.lsp_overlay.hover_visible
                 || self.lsp_overlay_editor != Some(editor_id)
             {
-                self.lsp_hover_interactive = false;
+                self.lsp_overlay.hover_interactive = false;
                 self.lsp_hover_hide_deadline = None;
                 self.lsp_hover_pending = None;
             } else {
@@ -299,14 +332,16 @@ impl DemoApp {
 
         let Some((position, anchor_point)) = anchor else {
             // No valid anchor point - schedule hide if hover is visible
-            if self.lsp_hover_visible
+            if self.lsp_overlay.hover_visible
                 && self.lsp_overlay_editor == Some(editor_id)
             {
                 return;
             }
-            if self.lsp_hover_visible {
-                self.lsp_hover_hide_deadline =
-                    Some(Instant::now() + Duration::from_millis(400));
+            if self.lsp_overlay.hover_visible {
+                self.lsp_hover_hide_deadline = Some(
+                    Instant::now()
+                        + Duration::from_millis(LSP_HOVER_REQUEST_DELAY_MS),
+                );
             }
             return;
         };
@@ -322,23 +357,25 @@ impl DemoApp {
 
         // Schedule a new hover request with a delay
         self.lsp_hover_anchor = Some((editor_id, position));
-        self.lsp_hover_interactive = false;
+        self.lsp_overlay.hover_interactive = false;
         self.lsp_hover_pending = Some(LspHoverPending {
             editor_id,
             position,
             point: anchor_point,
-            ready_at: Instant::now() + Duration::from_millis(400),
+            ready_at: Instant::now()
+                + Duration::from_millis(LSP_HOVER_REQUEST_DELAY_MS),
         });
         self.lsp_hover_hide_deadline = None;
     }
 
-    /// Processes hover-related timers (pending requests and hide deadlines)
-    /// Should be called periodically to trigger delayed hover requests and auto-hide
+    /// Processes hover-related timers (pending requests and hide deadlines).
+    ///
+    /// Should be called periodically to trigger delayed hover requests and auto-hide.
     pub(super) fn process_lsp_hover_timers(&mut self) {
         let now = Instant::now();
 
         // Clear hover if visible but no editor is associated
-        if self.lsp_hover_visible && self.lsp_overlay_editor.is_none() {
+        if self.lsp_overlay.hover_visible && self.lsp_overlay_editor.is_none() {
             self.clear_lsp_hover();
         }
 
@@ -356,7 +393,7 @@ impl DemoApp {
                 };
 
                 if request_sent {
-                    self.lsp_hover_position = Some(pending.point);
+                    self.lsp_overlay.set_hover_position(pending.point);
                     self.lsp_overlay_editor = Some(pending.editor_id);
                 } else {
                     self.lsp_hover_anchor = None;
@@ -370,24 +407,48 @@ impl DemoApp {
         // Check if we should auto-hide the hover tooltip
         if let Some(deadline) = self.lsp_hover_hide_deadline
             && now >= deadline
-            && !self.lsp_hover_interactive
+            && !self.lsp_overlay.hover_interactive
         {
             self.clear_lsp_hover();
         }
     }
 
-    /// Clears all hover-related state
+    /// Clears all hover-related state.
     pub(super) fn clear_lsp_hover(&mut self) {
-        self.lsp_last_hover = None;
-        self.lsp_hover_visible = false;
-        self.lsp_hover_position = None;
+        self.lsp_overlay.clear_hover();
         self.lsp_hover_anchor = None;
-        self.lsp_hover_interactive = false;
         self.lsp_hover_pending = None;
         self.lsp_hover_hide_deadline = None;
 
         // Only clear overlay editor if completion is not visible
-        if !self.lsp_completion_visible {
+        if !self.lsp_overlay.completion_visible {
+            self.lsp_overlay_editor = None;
+        }
+    }
+
+    /// Navigates the completion list by `direction` steps and scrolls to the selection.
+    ///
+    /// Pass `-1` for up and `1` for down. Does nothing when the menu is hidden or empty.
+    pub(super) fn navigate_completion(
+        &mut self,
+        direction: i32,
+    ) -> Task<Message> {
+        if self.lsp_overlay.completion_visible
+            && !self.lsp_overlay.completion_items.is_empty()
+        {
+            self.lsp_overlay.navigate(direction);
+            let scroll_y = self.lsp_overlay.scroll_offset_for_selected();
+            return scroll_to(
+                Id::new("completion_scrollable"),
+                scrollable::AbsoluteOffset { x: 0.0, y: scroll_y },
+            );
+        }
+        Task::none()
+    }
+
+    /// Clears `lsp_overlay_editor` when the hover tooltip is no longer visible.
+    pub(super) fn clear_overlay_editor_if_no_hover(&mut self) {
+        if !self.lsp_overlay.hover_visible {
             self.lsp_overlay_editor = None;
         }
     }
@@ -409,13 +470,7 @@ impl DemoApp {
                         if text.trim().is_empty() {
                             self.clear_lsp_hover();
                         } else {
-                            self.lsp_last_hover = Some(text.clone());
-                            if let Some(hover) = self.lsp_last_hover.as_ref() {
-                                self.lsp_hover_items =
-                                    iced::widget::markdown::parse(hover)
-                                        .collect();
-                            }
-                            self.lsp_hover_visible = true;
+                            self.lsp_overlay.show_hover(text);
                             self.lsp_hover_hide_deadline = None;
                             if self.lsp_overlay_editor.is_none() {
                                 self.lsp_overlay_editor =
@@ -425,22 +480,18 @@ impl DemoApp {
                     }
                     // Handle completion response from LSP server
                     LspEvent::Completion { items } => {
-                        self.lsp_all_completions = items.clone();
-                        self.lsp_completion_selected = 0;
-                        self.filter_completions();
-
                         // Record cursor position for menu placement
-                        if let Some(tab) = self
+                        let position = self
                             .tabs
                             .iter()
                             .find(|t| t.id == self.active_tab_id)
-                        {
-                            self.lsp_completion_position =
-                                tab.editor.cursor_screen_position();
-                        }
+                            .and_then(|tab| tab.editor.cursor_screen_position())
+                            .unwrap_or(iced::Point::new(4.0, 4.0));
+
+                        self.lsp_overlay.set_completions(items, position);
 
                         if self.lsp_overlay_editor.is_none()
-                            && self.lsp_completion_visible
+                            && self.lsp_overlay.completion_visible
                         {
                             self.lsp_overlay_editor = Some(self.active_tab_id);
                         }
