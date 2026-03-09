@@ -17,7 +17,7 @@ repository = "https://github.com/LuDog71FR/iced-code-editor"
 authors = ["LuDog71 <ludog71.trekker238@passmail.net>"]
 
 [workspace.dependencies]
-iced = { version = "0.14", features = ["advanced", "highlighter", "canvas"] }
+iced = { version = "0.14", features = ["advanced", "highlighter", "canvas", "markdown"] }
 
 [profile.release]
 panic = 'abort'

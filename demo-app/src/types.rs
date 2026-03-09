@@ -2,10 +2,13 @@ use iced::Font;
 use iced_code_editor::Language;
 
 /// Identifier for which editor is being referenced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EditorId {
-    Left,
-    Right,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EditorId(pub usize);
+
+impl std::fmt::Display for EditorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Editor {}", self.0)
+    }
 }
 
 /// Wrapper for Font to implement Display trait for pick_list.
@@ -178,11 +181,4 @@ impl std::fmt::Display for Template {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name())
     }
-}
-
-/// Pane content types for the editor PaneGrid.
-#[derive(Debug, Clone, Copy)]
-pub enum PaneType {
-    EditorLeft,
-    EditorRight,
 }

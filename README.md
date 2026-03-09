@@ -208,6 +208,23 @@ if editor.search_replace_enabled() {
 
 This is useful for read-only editors or when you want to provide your own search interface.
 
+### Open search/replace from your own buttons
+
+Besides keyboard shortcuts, you can open or close the dialogs via API:
+
+```rust
+// Open search dialog (same as Ctrl+F)
+let task = editor.open_search_dialog();
+
+// Open search+replace dialog (same as Ctrl+H)
+let task = editor.open_search_replace_dialog();
+
+// Close dialog (same as Esc)
+let task = editor.close_search_dialog();
+```
+
+Return these tasks from your app `update` function after mapping to your message type.
+
 ### Enable/disable line wrapping
 
 Line wrapping is **enabled by default** at viewport width. Long lines can be wrapped automatically at the viewport width or at a fixed column:

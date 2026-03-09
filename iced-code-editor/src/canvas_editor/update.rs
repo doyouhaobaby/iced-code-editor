@@ -33,6 +33,7 @@ impl CodeEditor {
         *self.visual_lines_cache.borrow_mut() = None;
         self.content_cache.clear();
         self.overlay_cache.clear();
+        self.enqueue_lsp_change();
     }
 
     /// Performs common cleanup operations after navigation operations.
@@ -122,6 +123,13 @@ impl CodeEditor {
         self.history.push(Box::new(cmd));
 
         self.finish_edit_operation();
+
+        // Auto-trigger LSP completion for identifier characters and trigger characters
+        if ch.is_alphanumeric() || ch == '_' || ch == '.' {
+            self.lsp_flush_pending_changes();
+            self.lsp_request_completion();
+        }
+
         self.scroll_to_cursor()
     }
 
@@ -449,6 +457,26 @@ impl CodeEditor {
         self.page_down();
         self.finish_navigation_operation();
         self.scroll_to_cursor()
+    }
+
+    /// Handles direct navigation to an explicit logical position.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - Target line index (0-based)
+    /// * `col` - Target column index (0-based)
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` that scrolls to keep the cursor visible
+    fn handle_goto_position(
+        &mut self,
+        line: usize,
+        col: usize,
+    ) -> Task<Message> {
+        // End grouping on navigation command
+        self.end_grouping_if_active();
+        self.set_cursor(line, col)
     }
 
     // =========================================================================
@@ -1139,12 +1167,16 @@ impl CodeEditor {
             Message::End(shift) => self.handle_end(*shift),
             Message::CtrlHome => self.handle_ctrl_home(),
             Message::CtrlEnd => self.handle_ctrl_end(),
+            Message::GotoPosition(line, col) => {
+                self.handle_goto_position(*line, *col)
+            }
             Message::PageUp => self.handle_page_up(),
             Message::PageDown => self.handle_page_down(),
 
             // Mouse and selection operations
             Message::MouseClick(point) => self.handle_mouse_click_msg(*point),
             Message::MouseDrag(point) => self.handle_mouse_drag_msg(*point),
+            Message::MouseHover(point) => self.handle_mouse_drag_msg(*point),
             Message::MouseRelease => self.handle_mouse_release_msg(),
 
             // Clipboard operations
@@ -1197,6 +1229,11 @@ impl CodeEditor {
             Message::HorizontalScrolled(viewport) => {
                 self.handle_horizontal_scrolled_msg(*viewport)
             }
+
+            // Handle the "Jump to Definition" action triggered by Ctrl+Click.
+            // Currently, this returns `Task::none()` as the actual navigation logic
+            // is delegated to the `LspClient` implementation or handled elsewhere.
+            Message::JumpClick(_point) => Task::none(),
         }
     }
 }
@@ -1385,6 +1422,29 @@ mod tests {
         assert_eq!(editor.cursor, (2, 5));
         assert_eq!(editor.selection_start, None);
         assert_eq!(editor.selection_end, None);
+    }
+
+    #[test]
+    fn test_goto_position_sets_cursor_and_clears_selection() {
+        let mut editor = CodeEditor::new("line1\nline2\nline3", "py");
+        editor.selection_start = Some((0, 0));
+        editor.selection_end = Some((1, 2));
+
+        let _ = editor.update(&Message::GotoPosition(1, 3));
+
+        assert_eq!(editor.cursor, (1, 3));
+        assert_eq!(editor.selection_start, None);
+        assert_eq!(editor.selection_end, None);
+    }
+
+    #[test]
+    fn test_goto_position_clamps_out_of_range() {
+        let mut editor = CodeEditor::new("a\nbb", "py");
+
+        let _ = editor.update(&Message::GotoPosition(99, 99));
+
+        // Clamped to last line (index 1) and end of that line (len = 2)
+        assert_eq!(editor.cursor, (1, 2));
     }
 
     #[test]
@@ -1762,8 +1822,7 @@ mod tests {
                 .visual_lines_cache
                 .borrow()
                 .as_ref()
-                .map_or(true, |c| c.key.buffer_revision
-                    == editor.buffer_revision),
+                .is_none_or(|c| c.key.buffer_revision == editor.buffer_revision),
             "buffer edits should not leave stale data in the visual lines cache"
         );
     }

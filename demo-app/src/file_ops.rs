@@ -4,9 +4,7 @@ use std::path::PathBuf;
 #[cfg(target_arch = "wasm32")]
 pub async fn open_file_dialog() -> Result<(PathBuf, String), String> {
     let file = rfd::AsyncFileDialog::new()
-        .add_filter("Lua Files", &["lua"])
-        .add_filter("All Files", &["*"])
-        .set_title("Open Lua File")
+        .set_title("Open File")
         .pick_file()
         .await
         .ok_or_else(|| "No file selected".to_string())?;
@@ -21,12 +19,8 @@ pub async fn open_file_dialog() -> Result<(PathBuf, String), String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn open_file_dialog() -> Result<(PathBuf, String), String> {
-    let file = rfd::AsyncFileDialog::new()
-        .add_filter("Lua Files", &["lua"])
-        .add_filter("All Files", &["*"])
-        .set_title("Open Lua File")
-        .pick_file()
-        .await;
+    let file =
+        rfd::AsyncFileDialog::new().set_title("Open File").pick_file().await;
 
     if let Some(file) = file {
         let path = file.path().to_path_buf();
@@ -48,8 +42,6 @@ pub async fn save_file(
         path.file_name().and_then(|n| n.to_str()).unwrap_or("demo.lua");
 
     let file = rfd::AsyncFileDialog::new()
-        .add_filter("Lua Files", &["lua"])
-        .add_filter("All Files", &["*"])
         .set_title("Save")
         .set_file_name(filename)
         .save_file()
@@ -77,7 +69,6 @@ pub async fn save_file(
 #[cfg(target_arch = "wasm32")]
 pub async fn save_file_as_dialog(content: String) -> Result<PathBuf, String> {
     let file = rfd::AsyncFileDialog::new()
-        .add_filter("Lua Files", &["lua"])
         .set_title("Save As")
         .save_file()
         .await
@@ -92,11 +83,8 @@ pub async fn save_file_as_dialog(content: String) -> Result<PathBuf, String> {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn save_file_as_dialog(content: String) -> Result<PathBuf, String> {
-    let file = rfd::AsyncFileDialog::new()
-        .add_filter("Lua Files", &["lua"])
-        .set_title("Save As")
-        .save_file()
-        .await;
+    let file =
+        rfd::AsyncFileDialog::new().set_title("Save As").save_file().await;
 
     if let Some(file) = file {
         let path = file.path().to_path_buf();
@@ -106,4 +94,12 @@ pub async fn save_file_as_dialog(content: String) -> Result<PathBuf, String> {
     } else {
         Err("Save cancelled".to_string())
     }
+}
+
+/// Reads a file from the given path.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn read_file(path: PathBuf) -> Result<(PathBuf, String), String> {
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Unable to read file: {}", e))?;
+    Ok((path, content))
 }

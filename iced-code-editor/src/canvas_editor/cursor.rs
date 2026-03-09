@@ -3,6 +3,11 @@
 use iced::widget::operation::scroll_to;
 use iced::widget::scrollable;
 use iced::{Point, Task};
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
+
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 use super::measure_text_width;
 
@@ -10,6 +15,39 @@ use super::wrapping::WrappingCalculator;
 use super::{ArrowDirection, CodeEditor, Message};
 
 impl CodeEditor {
+    /// Sets the cursor position to the specified line and column.
+    ///
+    /// This method ensures the new position is within the bounds of the text buffer.
+    /// It also resets the blinking animation, clears the overlay cache (to redraw
+    /// the cursor immediately), and scrolls the view to make the cursor visible.
+    ///
+    /// # Arguments
+    ///
+    /// * `line` - The target line index (0-based).
+    /// * `col` - The target column index (0-based).
+    ///
+    /// # Returns
+    ///
+    /// A `Task` that may produce a `Message` (e.g., if scrolling is needed).
+    pub fn set_cursor(&mut self, line: usize, col: usize) -> Task<Message> {
+        let line = line.min(self.buffer.line_count().saturating_sub(1));
+        let line_len = self.buffer.line(line).chars().count();
+        let col = col.min(line_len);
+
+        self.cursor = (line, col);
+        // Programmatic jumps should end any drag gesture. Otherwise, a stale
+        // drag state may let subsequent hover events move the caret away.
+        self.is_dragging = false;
+        self.selection_start = None;
+        self.selection_end = None;
+
+        // Reset blink
+        self.last_blink = Instant::now();
+
+        self.overlay_cache.clear();
+        self.scroll_to_cursor()
+    }
+
     /// Moves the cursor based on arrow key direction.
     pub(crate) fn move_cursor(&mut self, direction: ArrowDirection) {
         let (line, col) = self.cursor;
@@ -121,7 +159,7 @@ impl CodeEditor {
     /// 1. Whether the click is inside the gutter area.
     /// 2. Visual line mapping after wrapping.
     /// 3. CJK character widths (wide characters use FONT_SIZE, narrow use CHAR_WIDTH).
-    fn calculate_cursor_from_point(
+    pub(crate) fn calculate_cursor_from_point(
         &self,
         point: Point,
     ) -> Option<(usize, usize)> {

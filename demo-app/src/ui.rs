@@ -1,9 +1,10 @@
-use crate::app::{DemoApp, Message};
-use crate::types::{EditorId, FontOption, LanguageOption, PaneType, Template};
-use iced::widget::pane_grid::{Content, TitleBar};
+mod lsp;
+
+use crate::app::{DemoApp, EditorTab, Message};
+use crate::types::{FontOption, LanguageOption, Template};
 use iced::widget::{
-    PaneGrid, Space, button, center, checkbox, column, container, mouse_area,
-    pick_list, row, scrollable, slider, stack, text, text_input,
+    Space, button, center, checkbox, column, container, mouse_area, pick_list,
+    row, scrollable, slider, stack, text, text_input,
 };
 use iced::{Color, Element, Length, Theme};
 
@@ -18,8 +19,7 @@ pub fn view(app: &DemoApp) -> Element<'_, Message> {
         button(text("Save")).on_press(Message::SaveFile),
         button(text("Save As")).on_press(Message::SaveFileAs),
         button(text("Run")).on_press(Message::RunCode),
-        text(file_status(app))
-            .style(move |_| text::Style { color: Some(text_color) }),
+        button(text("+ New Tab")).on_press(Message::NewTab),
         Space::new().width(Length::Fill),
         mouse_area(
             text_input("Input for testing focus ...", &app.text_input_value)
@@ -45,70 +45,123 @@ pub fn view(app: &DemoApp) -> Element<'_, Message> {
         container(text("")).height(0)
     };
 
-    // PaneGrid with two editors (resizable horizontally)
-    let editors_pane_grid =
-        PaneGrid::new(&app.panes, |_id, pane, _is_maximized| {
-            let title_bar_style = palette.background.weak.color;
+    // Tab Bar
+    let tabs_list = row(app
+        .tabs
+        .iter()
+        .map(|tab| view_tab_header(tab, tab.id == app.active_tab_id))
+        .collect::<Vec<_>>())
+    .spacing(2);
 
-            match pane {
-                PaneType::EditorLeft => {
-                    let title =
-                        TitleBar::new(text("Editor (Left)").style(move |_| {
-                            text::Style { color: Some(text_color) }
-                        }))
-                        .style(move |_| container::Style {
-                            background: Some(iced::Background::Color(
-                                title_bar_style,
-                            )),
-                            ..Default::default()
-                        })
-                        .padding(5);
+    let tab_height = 38.0;
+    let tab_scrollbar_height = 12.0;
+    let tab_bar_height = if app.tabs_overflow {
+        tab_height + tab_scrollbar_height
+    } else {
+        tab_height
+    };
 
-                    Content::new(view_editor_pane(
-                        app,
-                        EditorId::Left,
-                        text_color,
-                    ))
-                    .title_bar(title)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(
-                            palette.background.base.color,
-                        )),
-                        ..Default::default()
-                    })
-                }
-                PaneType::EditorRight => {
-                    let title = TitleBar::new(text("Editor (Right)").style(
-                        move |_| text::Style { color: Some(text_color) },
-                    ))
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(
-                            title_bar_style,
-                        )),
-                        ..Default::default()
-                    })
-                    .padding(5);
+    let tab_bar = scrollable(tabs_list)
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::new(),
+        ))
+        .height(tab_bar_height)
+        .style(|theme: &Theme, _status| {
+            let palette = theme.extended_palette();
+            scrollable::Style {
+                container: container::Style {
+                    background: Some(palette.background.weak.color.into()),
+                    ..Default::default()
+                },
+                vertical_rail: scrollable::Rail {
+                    background: Some(palette.background.weak.color.into()),
+                    border: iced::Border {
+                        radius: 4.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    scroller: scrollable::Scroller {
+                        background: palette.primary.weak.color.into(),
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                    },
+                },
+                horizontal_rail: scrollable::Rail {
+                    background: Some(palette.background.weak.color.into()),
+                    border: iced::Border {
+                        radius: 4.0.into(),
+                        width: 0.0,
+                        color: Color::TRANSPARENT,
+                    },
+                    scroller: scrollable::Scroller {
+                        background: palette.primary.weak.color.into(),
+                        border: iced::Border {
+                            radius: 4.0.into(),
+                            width: 0.0,
+                            color: Color::TRANSPARENT,
+                        },
+                    },
+                },
+                gap: None,
+                auto_scroll: scrollable::AutoScroll {
+                    background: Color::TRANSPARENT.into(),
+                    border: iced::Border::default(),
+                    shadow: iced::Shadow::default(),
+                    icon: Color::TRANSPARENT,
+                },
+            }
+        });
 
-                    Content::new(view_editor_pane(
-                        app,
-                        EditorId::Right,
-                        text_color,
-                    ))
-                    .title_bar(title)
-                    .style(move |_| container::Style {
-                        background: Some(iced::Background::Color(
-                            palette.background.base.color,
-                        )),
-                        ..Default::default()
-                    })
-                }
+    // File path display below tabs
+    let file_path_display: Element<'_, Message> = if let Some(tab) =
+        app.tabs.iter().find(|t| t.id == app.active_tab_id)
+    {
+        let path_text = tab
+            .file_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "Untitled".to_string());
+
+        container(text(path_text).size(12).style(move |_| text::Style {
+            color: Some(palette.background.weak.text),
+        }))
+        .padding([4, 10])
+        .width(Length::Fill)
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(palette.background.weak.color.into()),
+                border: iced::Border {
+                    width: 1.0,
+                    color: palette.background.strong.color,
+                    ..iced::Border::default()
+                },
+                ..Default::default()
             }
         })
-        .on_resize(10, Message::PaneResized)
-        .spacing(2)
-        .height(Length::FillPortion(7)); // 70% of available height
+        .into()
+    } else {
+        container(text("")).height(0).into()
+    };
 
-    // Output view (separate from PaneGrid)
+    // Editor Pane
+    let editor_pane = if let Some(tab) =
+        app.tabs.iter().find(|t| t.id == app.active_tab_id)
+    {
+        view_editor_pane(app, tab, text_color)
+    } else {
+        container(text("No open tabs").size(20))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .into()
+    };
+
+    // Output view
     let title_bar_style = palette.background.weak.color;
     let output_title = container(
         text("Output").style(move |_| text::Style { color: Some(text_color) }),
@@ -135,12 +188,19 @@ pub fn view(app: &DemoApp) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::FillPortion(3)); // 30% of available height
 
-    // Main layout: column with toolbar, error_bar, editors, and output
+    // Main layout
     let content = container(
-        column![toolbar, error_bar, editors_pane_grid, output_view]
-            .spacing(2)
-            .width(Length::Fill)
-            .height(Length::Fill),
+        column![
+            toolbar,
+            error_bar,
+            tab_bar,
+            file_path_display,
+            editor_pane,
+            output_view
+        ]
+        .spacing(2)
+        .width(Length::Fill)
+        .height(Length::Fill),
     )
     .style(move |_| container::Style {
         background: Some(iced::Background::Color(
@@ -253,26 +313,106 @@ pub fn view(app: &DemoApp) -> Element<'_, Message> {
     }
 }
 
-/// Renders the editor pane content.
-pub fn view_editor_pane(
-    app: &DemoApp,
-    editor_id: EditorId,
-    _text_color: Color,
-) -> Element<'_, Message> {
-    // Select data based on editor_id
-    let (editor, search_replace_enabled, line_numbers_enabled) = match editor_id
-    {
-        EditorId::Left => (
-            &app.editor_left,
-            app.search_replace_enabled_left,
-            app.line_numbers_enabled_left,
-        ),
-        EditorId::Right => (
-            &app.editor_right,
-            app.search_replace_enabled_right,
-            app.line_numbers_enabled_right,
-        ),
+fn view_tab_header(tab: &EditorTab, is_active: bool) -> Element<'_, Message> {
+    let name = tab
+        .file_path
+        .as_ref()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .unwrap_or("Untitled");
+    let modified = if tab.is_dirty { "*" } else { "" };
+    let label = format!("{}{}", name, modified);
+
+    let label_text = text(label).size(14).style(move |theme: &Theme| {
+        let palette = theme.extended_palette();
+        text::Style {
+            color: Some(if is_active {
+                palette.background.base.text
+            } else {
+                let mut color = palette.background.base.text;
+                color.a = 0.6;
+                color
+            }),
+        }
+    });
+
+    let close_btn = button(text("×").size(16))
+        .on_press(Message::CloseTab(tab.id))
+        .padding(0)
+        .width(20)
+        .style(button::text);
+
+    // Active tab indicator (top line)
+    let indicator: Element<'_, Message> = if is_active {
+        container(Space::new())
+            .width(Length::Fill)
+            .height(2)
+            .style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                container::Style {
+                    background: Some(palette.primary.base.color.into()),
+                    ..Default::default()
+                }
+            })
+            .into()
+    } else {
+        container(Space::new()).width(Length::Fill).height(2).into()
     };
+
+    let content = column![
+        indicator,
+        container(
+            row![
+                button(label_text)
+                    .on_press(Message::SelectTab(tab.id))
+                    .style(button::text),
+                close_btn
+            ]
+            .spacing(5)
+            .align_y(iced::Center)
+        )
+        .padding([3, 10])
+        .height(Length::Fill)
+    ]
+    .spacing(0);
+
+    container(content)
+        .height(38)
+        .style(move |theme: &Theme| {
+            let palette = theme.extended_palette();
+            container::Style {
+                background: Some(
+                    if is_active {
+                        palette.background.base.color
+                    } else {
+                        palette.background.weak.color
+                    }
+                    .into(),
+                ),
+                border: iced::Border {
+                    width: 1.0,
+                    color: palette.background.strong.color,
+                    ..iced::Border::default()
+                },
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// Renders the editor pane content.
+pub fn view_editor_pane<'a>(
+    app: &'a DemoApp,
+    tab: &'a EditorTab,
+    _text_color: Color,
+) -> Element<'a, Message> {
+    let editor_id = tab.id;
+    let editor = &tab.editor;
+
+    // We assume these settings are global for now, but could be per-tab
+    let wrap_enabled = editor.wrap_enabled();
+    let search_replace_enabled = editor.search_replace_enabled();
+    let line_numbers_enabled = editor.line_numbers_enabled();
 
     // Template picker using pick_list
     let template_picker =
@@ -283,7 +423,7 @@ pub fn view_editor_pane(
         .text_size(14);
 
     // Wrap checkbox
-    let wrap_checkbox = checkbox(editor.wrap_enabled())
+    let wrap_checkbox = checkbox(wrap_enabled)
         .label("Line wrapping")
         .on_toggle(move |b| Message::ToggleWrap(editor_id, b))
         .text_size(14);
@@ -300,11 +440,94 @@ pub fn view_editor_pane(
         .on_toggle(move |b| Message::ToggleLineNumbers(editor_id, b))
         .text_size(14);
 
-    // Editor in a constrained container (400px height, clipped)
+    // LSP Status
+    #[cfg(not(target_arch = "wasm32"))]
+    let lsp_status: Element<'_, Message> = if let Some(key) = tab.lsp_server_key
+    {
+        let (status_text, is_working, is_finishing) =
+            if let Some(progress_map) = app.lsp_progress.get(key) {
+                if let Some(progress) = progress_map.values().next() {
+                    let percent_val = progress.percentage.unwrap_or(0);
+                    if percent_val >= 100 {
+                        (format!("LSP: {} (Finishing...)", key), true, true)
+                    } else {
+                        let percent = progress
+                            .percentage
+                            .map(|p| format!(" {}%", p))
+                            .unwrap_or_default();
+                        let msg = progress
+                            .message
+                            .as_ref()
+                            .map(|m| format!(": {}", m))
+                            .unwrap_or_default();
+                        (
+                            format!(
+                                "LSP: {} ({}{}{})",
+                                key, progress.title, msg, percent
+                            ),
+                            true,
+                            false,
+                        )
+                    }
+                } else {
+                    (format!("LSP: {}", key), false, false)
+                }
+            } else {
+                (format!("LSP: {}", key), false, false)
+            };
+
+        let spinner = if is_working {
+            if is_finishing {
+                text("✓").size(14).style(move |theme: &Theme| {
+                    let palette = theme.extended_palette();
+                    text::Style { color: Some(palette.success.base.color) }
+                })
+            } else {
+                let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let frame = frames[app.spinner_frame % frames.len()];
+                text(frame).size(14).font(iced::font::Font::MONOSPACE).style(
+                    move |theme: &Theme| {
+                        let palette = theme.extended_palette();
+                        text::Style { color: Some(palette.primary.base.color) }
+                    },
+                )
+            }
+        } else {
+            text("●").size(14).style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                text::Style { color: Some(palette.success.base.color) }
+            })
+        };
+
+        row![
+            spinner,
+            text(status_text).size(14).style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                text::Style { color: Some(palette.success.base.color) }
+            })
+        ]
+        .spacing(5)
+        .align_y(iced::Center)
+        .into()
+    } else {
+        text("LSP: Inactive")
+            .size(14)
+            .style(move |theme: &Theme| {
+                let palette = theme.extended_palette();
+                text::Style { color: Some(palette.danger.base.color) }
+            })
+            .into()
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let lsp_status: Element<'_, Message> = text("LSP: N/A").size(14).into();
+
+    // Editor in a constrained container
     let editor_view = container(
         editor.view().map(move |e| Message::EditorEvent(editor_id, e)),
     )
     .width(Length::Fill)
+    .height(Length::Fill)
     .clip(true)
     .style(|_| container::Style {
         border: iced::Border {
@@ -315,6 +538,13 @@ pub fn view_editor_pane(
         ..Default::default()
     });
 
+    let overlay = lsp::view_lsp_overlay(app, editor_id);
+    let editor_stack: Element<'_, Message> =
+        stack![editor_view, overlay].into();
+    let editor_stack = mouse_area(editor_stack)
+        .on_enter(Message::EditorMouseEntered(editor_id))
+        .on_exit(Message::EditorMouseExited(editor_id));
+
     container(
         column![
             row![
@@ -324,18 +554,19 @@ pub fn view_editor_pane(
                 Space::new().width(10),
                 search_replace_checkbox,
                 Space::new().width(10),
-                line_numbers_checkbox
+                line_numbers_checkbox,
+                Space::new().width(10),
+                lsp_status
             ]
             .padding(10),
-            editor_view,
+            editor_stack,
         ]
         .spacing(5)
         .width(Length::Fill)
         .height(Length::Fill),
     )
     .width(Length::Fill)
-    .height(Length::Fill)
-    .clip(true)
+    .height(Length::FillPortion(7))
     .into()
 }
 
@@ -383,6 +614,8 @@ pub fn view_output_pane(
         .padding(5)
         .align_y(iced::Center);
 
+    let lsp_panel = lsp::view_lsp_panel();
+
     // Log messages content
     let log_content: Vec<Element<'_, Message>> = app
         .log_messages
@@ -409,37 +642,8 @@ pub fn view_output_pane(
     .height(Length::Fill)
     .width(Length::Fill);
 
-    column![toolbar, log_scrollable]
+    column![toolbar, lsp_panel, log_scrollable]
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
-}
-
-/// Returns the file status string.
-pub fn file_status(app: &DemoApp) -> String {
-    let left_name = app
-        .current_file_left
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
-        .unwrap_or("New file");
-    let right_name = app
-        .current_file_right
-        .as_ref()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
-        .unwrap_or("New file");
-
-    let left_mod = if app.editor_left.is_modified() { "*" } else { "" };
-    let right_mod = if app.editor_right.is_modified() { "*" } else { "" };
-
-    let active_left =
-        if app.active_editor == EditorId::Left { "● " } else { "" };
-    let active_right =
-        if app.active_editor == EditorId::Right { " ●" } else { "" };
-
-    format!(
-        "{}L: {}{} | R: {}{}{}",
-        active_left, left_name, left_mod, right_name, right_mod, active_right
-    )
 }

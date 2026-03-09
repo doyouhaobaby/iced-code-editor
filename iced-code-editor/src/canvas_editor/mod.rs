@@ -8,7 +8,7 @@ use iced::advanced::text::{
 };
 use iced::widget::operation::{RelativeOffset, snap_to};
 use iced::widget::{Id, canvas};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering as CmpOrdering;
 use std::ops::Range;
 use std::rc::Rc;
@@ -38,6 +38,7 @@ pub mod command;
 mod cursor;
 pub mod history;
 pub mod ime_requester;
+pub mod lsp;
 mod search;
 mod search_dialog;
 mod selection;
@@ -49,6 +50,7 @@ mod wrapping;
 pub(crate) const FONT_SIZE: f32 = 14.0;
 pub(crate) const LINE_HEIGHT: f32 = 20.0;
 pub(crate) const CHAR_WIDTH: f32 = 8.4; // Monospace character width
+pub(crate) const TAB_WIDTH: usize = 4;
 pub(crate) const GUTTER_WIDTH: f32 = 45.0;
 pub(crate) const CURSOR_BLINK_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(530);
@@ -69,6 +71,9 @@ pub(crate) fn measure_char_width(
     full_char_width: f32,
     char_width: f32,
 ) -> f32 {
+    if c == '\t' {
+        return char_width * TAB_WIDTH as f32;
+    }
     match c.width() {
         Some(w) if w > 1 => full_char_width,
         Some(_) => char_width,
@@ -80,7 +85,7 @@ pub(crate) fn measure_char_width(
 ///
 /// - Wide characters (e.g. Chinese) use FONT_SIZE.
 /// - Narrow characters (e.g. Latin) use CHAR_WIDTH.
-/// - Control characters have width 0.
+/// - Control characters (except tab) have width 0.
 ///
 /// # Arguments
 ///
@@ -212,12 +217,27 @@ pub struct CodeEditor {
     pub(crate) search_replace_enabled: bool,
     /// Whether line numbers are displayed
     pub(crate) line_numbers_enabled: bool,
+    /// Active LSP client connection, if configured.
+    pub(crate) lsp_client: Option<Box<dyn lsp::LspClient>>,
+    /// Metadata for the currently open LSP document.
+    pub(crate) lsp_document: Option<lsp::LspDocument>,
+    /// Pending incremental LSP text changes not yet flushed.
+    pub(crate) lsp_pending_changes: Vec<lsp::LspTextChange>,
+    /// Shadow copy of buffer content used to compute LSP deltas.
+    pub(crate) lsp_shadow_text: String,
+    /// Whether to auto-flush LSP changes after edits.
+    pub(crate) lsp_auto_flush: bool,
     /// Whether the canvas has user input focus (for keyboard events)
     pub(crate) has_canvas_focus: bool,
     /// Whether input processing is locked to prevent focus stealing
     pub(crate) focus_locked: bool,
     /// Whether to show the cursor (for rendering)
     pub(crate) show_cursor: bool,
+    /// Current keyboard modifiers state (Ctrl, Alt, Shift, Logo).
+    ///
+    /// This is updated via subscription events and used to handle modifier-dependent
+    /// interactions, such as "Ctrl+Click" for jumping to a definition.
+    pub(crate) modifiers: Cell<iced::keyboard::Modifiers>,
     /// The font used for rendering text
     pub(crate) font: iced::Font,
     /// IME pre-edit state (for CJK input)
@@ -292,6 +312,8 @@ pub enum Message {
     MouseClick(iced::Point),
     /// Mouse drag for selection
     MouseDrag(iced::Point),
+    /// Mouse moved within the editor without dragging
+    MouseHover(iced::Point),
     /// Mouse released
     MouseRelease,
     /// Copy selected text (Ctrl+C)
@@ -314,6 +336,8 @@ pub enum Message {
     CtrlHome,
     /// Ctrl+End pressed (move to end of document)
     CtrlEnd,
+    /// Go to an explicit logical position (line, column), both 0-based.
+    GotoPosition(usize, usize),
     /// Viewport scrolled - track scroll position
     Scrolled(iced::widget::scrollable::Viewport),
     /// Horizontal scrollbar scrolled (only when wrap is disabled)
@@ -354,6 +378,10 @@ pub enum Message {
     CanvasFocusGained,
     /// Canvas lost focus (external widget interaction)
     CanvasFocusLost,
+    /// Triggered when the user performs a Ctrl+Click (or Cmd+Click on macOS)
+    /// on the editor content, intending to jump to the definition of the symbol
+    /// under the cursor.
+    JumpClick(iced::Point),
     /// IME input method opened
     ImeOpened,
     /// IME pre-edit update (content, selection range)
@@ -421,9 +449,15 @@ impl CodeEditor {
             translations: Translations::default(),
             search_replace_enabled: true,
             line_numbers_enabled: true,
+            lsp_client: None,
+            lsp_document: None,
+            lsp_pending_changes: Vec::new(),
+            lsp_shadow_text: String::new(),
+            lsp_auto_flush: true,
             has_canvas_focus: false,
             focus_locked: false,
             show_cursor: false,
+            modifiers: Cell::new(iced::keyboard::Modifiers::default()),
             font: iced::Font::MONOSPACE,
             ime_preedit: None,
             font_size: FONT_SIZE,
@@ -538,6 +572,11 @@ impl CodeEditor {
         self.full_char_width
     }
 
+    /// Measures the rendered width for a given text snippet using editor metrics.
+    pub fn measure_text_width(&self, text: &str) -> f32 {
+        measure_text_width(text, self.full_char_width, self.char_width)
+    }
+
     /// Sets the line height used by the editor
     ///
     /// # Arguments
@@ -556,6 +595,21 @@ impl CodeEditor {
     /// The line height in pixels
     pub fn line_height(&self) -> f32 {
         self.line_height
+    }
+
+    /// Returns the current viewport height in pixels.
+    pub fn viewport_height(&self) -> f32 {
+        self.viewport_height
+    }
+
+    /// Returns the current viewport width in pixels.
+    pub fn viewport_width(&self) -> f32 {
+        self.viewport_width
+    }
+
+    /// Returns the current vertical scroll offset in pixels.
+    pub fn viewport_scroll(&self) -> f32 {
+        self.viewport_scroll
     }
 
     /// Returns the current text content as a string.
@@ -654,6 +708,178 @@ impl CodeEditor {
         self.translations.language()
     }
 
+    /// Attaches an LSP client and opens a document for the current buffer.
+    ///
+    /// This sends an initial `did_open` with the current buffer contents and
+    /// resets any pending LSP change state.
+    ///
+    /// # Arguments
+    ///
+    /// * `client` - The LSP client to notify
+    /// * `document` - Document metadata describing the buffer
+    pub fn attach_lsp(
+        &mut self,
+        mut client: Box<dyn lsp::LspClient>,
+        mut document: lsp::LspDocument,
+    ) {
+        document.version = 1;
+        let text = self.buffer.to_string();
+        client.did_open(&document, &text);
+        self.lsp_client = Some(client);
+        self.lsp_document = Some(document);
+        self.lsp_shadow_text = text;
+        self.lsp_pending_changes.clear();
+    }
+
+    /// Opens a new document on the attached LSP client.
+    ///
+    /// If a document is already open, this will close it before opening the new
+    /// one and reset pending change tracking.
+    ///
+    /// # Arguments
+    ///
+    /// * `document` - Document metadata describing the buffer
+    pub fn lsp_open_document(&mut self, mut document: lsp::LspDocument) {
+        let Some(client) = self.lsp_client.as_mut() else { return };
+        if let Some(current) = self.lsp_document.as_ref() {
+            client.did_close(current);
+        }
+        document.version = 1;
+        let text = self.buffer.to_string();
+        client.did_open(&document, &text);
+        self.lsp_document = Some(document);
+        self.lsp_shadow_text = text;
+        self.lsp_pending_changes.clear();
+    }
+
+    /// Detaches the current LSP client and closes any open document.
+    ///
+    /// This clears all LSP-related state on the editor instance.
+    pub fn detach_lsp(&mut self) {
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.did_close(document);
+        }
+        self.lsp_client = None;
+        self.lsp_document = None;
+        self.lsp_shadow_text = String::new();
+        self.lsp_pending_changes.clear();
+    }
+
+    /// Sends a `did_save` notification with the current buffer contents.
+    pub fn lsp_did_save(&mut self) {
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            let text = self.buffer.to_string();
+            client.did_save(document, &text);
+        }
+    }
+
+    /// Requests hover information at the current cursor position.
+    pub fn lsp_request_hover(&mut self) {
+        let position = self.lsp_position_from_cursor();
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_hover(document, position);
+        }
+    }
+
+    /// Requests hover information at a canvas point.
+    ///
+    /// Returns `true` if the point maps to a valid buffer position and the
+    /// request was sent.
+    pub fn lsp_request_hover_at(&mut self, point: iced::Point) -> bool {
+        let Some(position) = self.lsp_position_from_point(point) else {
+            return false;
+        };
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_hover(document, position);
+            return true;
+        }
+        false
+    }
+
+    /// Requests hover information at an explicit LSP position.
+    ///
+    /// Returns `true` if an LSP client is attached and the request was sent.
+    pub fn lsp_request_hover_at_position(
+        &mut self,
+        position: lsp::LspPosition,
+    ) -> bool {
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_hover(document, position);
+            return true;
+        }
+        false
+    }
+
+    /// Converts a canvas point to an LSP position, if possible.
+    pub fn lsp_position_at_point(
+        &self,
+        point: iced::Point,
+    ) -> Option<lsp::LspPosition> {
+        self.lsp_position_from_point(point)
+    }
+
+    /// Returns the hover anchor position and its canvas point for a given
+    /// cursor location.
+    ///
+    /// The anchor is the start of the word under the cursor, which is useful
+    /// for LSP hover and definition requests.
+    pub fn lsp_hover_anchor_at_point(
+        &self,
+        point: iced::Point,
+    ) -> Option<(lsp::LspPosition, iced::Point)> {
+        let (line, col) = self.calculate_cursor_from_point(point)?;
+        let line_content = self.buffer.line(line);
+        let anchor_col = Self::word_start_in_line(line_content, col);
+        let anchor_point =
+            self.point_from_position(line, anchor_col).unwrap_or(point);
+        let line = u32::try_from(line).unwrap_or(u32::MAX);
+        let character = u32::try_from(anchor_col).unwrap_or(u32::MAX);
+        Some((lsp::LspPosition { line, character }, anchor_point))
+    }
+
+    /// Requests completion items at the current cursor position.
+    pub fn lsp_request_completion(&mut self) {
+        let position = self.lsp_position_from_cursor();
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_completion(document, position);
+        }
+    }
+
+    /// Flushes pending LSP text changes to the attached client.
+    ///
+    /// This increments the document version and sends `did_change` with all
+    /// queued changes.
+    pub fn lsp_flush_pending_changes(&mut self) {
+        if self.lsp_pending_changes.is_empty() {
+            return;
+        }
+
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_mut())
+        {
+            let changes = std::mem::take(&mut self.lsp_pending_changes);
+            document.version = document.version.saturating_add(1);
+            client.did_change(document, &changes);
+        }
+    }
+
+    /// Sets whether LSP changes are flushed automatically after edits.
+    pub fn set_lsp_auto_flush(&mut self, auto_flush: bool) {
+        self.lsp_auto_flush = auto_flush;
+    }
+
     /// Requests focus for this editor.
     ///
     /// This method programmatically sets the focus to this editor instance,
@@ -742,6 +968,7 @@ impl CodeEditor {
         self.overlay_cache = canvas::Cache::default();
         self.buffer_revision = self.buffer_revision.wrapping_add(1);
         *self.visual_lines_cache.borrow_mut() = None;
+        self.enqueue_lsp_change();
 
         // Scroll to top to force a redraw
         snap_to(self.scrollable_id.clone(), RelativeOffset::START)
@@ -751,6 +978,136 @@ impl CodeEditor {
     pub(crate) fn reset_cursor_blink(&mut self) {
         self.last_blink = Instant::now();
         self.cursor_visible = true;
+    }
+
+    /// Converts the current cursor position into an LSP position.
+    fn lsp_position_from_cursor(&self) -> lsp::LspPosition {
+        let line = u32::try_from(self.cursor.0).unwrap_or(u32::MAX);
+        let character = u32::try_from(self.cursor.1).unwrap_or(u32::MAX);
+        lsp::LspPosition { line, character }
+    }
+
+    /// Converts a canvas point into an LSP position, if it hits the buffer.
+    fn lsp_position_from_point(
+        &self,
+        point: iced::Point,
+    ) -> Option<lsp::LspPosition> {
+        let (line, col) = self.calculate_cursor_from_point(point)?;
+        let line = u32::try_from(line).unwrap_or(u32::MAX);
+        let character = u32::try_from(col).unwrap_or(u32::MAX);
+        Some(lsp::LspPosition { line, character })
+    }
+
+    /// Converts a logical buffer position into a canvas point, if visible.
+    fn point_from_position(
+        &self,
+        line: usize,
+        col: usize,
+    ) -> Option<iced::Point> {
+        let visual_lines = self.visual_lines_cached(self.viewport_width);
+        let visual_index = wrapping::WrappingCalculator::logical_to_visual(
+            &visual_lines,
+            line,
+            col,
+        )?;
+        let visual_line = &visual_lines[visual_index];
+        let line_content = self.buffer.line(visual_line.logical_line);
+        let prefix_len = col.saturating_sub(visual_line.start_col);
+        let prefix_text: String = line_content
+            .chars()
+            .skip(visual_line.start_col)
+            .take(prefix_len)
+            .collect();
+        let x = self.gutter_width()
+            + 5.0
+            + measure_text_width(
+                &prefix_text,
+                self.full_char_width,
+                self.char_width,
+            );
+        let y = visual_index as f32 * self.line_height;
+        Some(iced::Point::new(x, y))
+    }
+
+    /// Returns the word-start column in a line for a given column.
+    ///
+    /// Word characters include ASCII alphanumerics and underscore.
+    pub(crate) fn word_start_in_line(line: &str, col: usize) -> usize {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            return 0;
+        }
+        let mut idx = col.min(chars.len());
+        if idx == chars.len() {
+            idx = idx.saturating_sub(1);
+        }
+        if !Self::is_word_char(chars[idx]) {
+            if idx > 0 && Self::is_word_char(chars[idx - 1]) {
+                idx -= 1;
+            } else {
+                return col.min(chars.len());
+            }
+        }
+        while idx > 0 && Self::is_word_char(chars[idx - 1]) {
+            idx -= 1;
+        }
+        idx
+    }
+
+    /// Returns the word-end column in a line for a given column.
+    pub(crate) fn word_end_in_line(line: &str, col: usize) -> usize {
+        let chars: Vec<char> = line.chars().collect();
+        if chars.is_empty() {
+            return 0;
+        }
+        let mut idx = col.min(chars.len());
+        if idx == chars.len() {
+            idx = idx.saturating_sub(1);
+        }
+
+        // If current char is not a word char, check if previous was (we might be just after the word)
+        if !Self::is_word_char(chars[idx]) {
+            if idx > 0 && Self::is_word_char(chars[idx - 1]) {
+                // We are just after a word, so idx is the end (exclusive)
+                // But wait, if we are at the space after "foo", idx points to space.
+                // "foo " -> ' ' is at 3. word_end should be 3.
+                // So if chars[idx] is not word char, and chars[idx-1] IS, then idx is the end.
+                return idx;
+            } else {
+                // Not on a word
+                return col.min(chars.len());
+            }
+        }
+
+        // If we are on a word char, scan forward
+        while idx < chars.len() && Self::is_word_char(chars[idx]) {
+            idx += 1;
+        }
+        idx
+    }
+
+    /// Returns true when the character is part of an identifier-style word.
+    pub(crate) fn is_word_char(ch: char) -> bool {
+        ch == '_' || ch.is_alphanumeric()
+    }
+
+    /// Computes and queues the latest LSP text change for the buffer.
+    ///
+    /// When auto-flush is enabled, this immediately sends changes.
+    fn enqueue_lsp_change(&mut self) {
+        if self.lsp_document.is_none() {
+            return;
+        }
+
+        let new_text = self.buffer.to_string();
+        let old_text = self.lsp_shadow_text.as_str();
+        if let Some(change) = lsp::compute_text_change(old_text, &new_text) {
+            self.lsp_pending_changes.push(change);
+        }
+        self.lsp_shadow_text = new_text;
+        if self.lsp_auto_flush {
+            self.lsp_flush_pending_changes();
+        }
     }
 
     /// Refreshes search matches after buffer modification.
@@ -862,6 +1219,39 @@ impl CodeEditor {
     /// `true` if search/replace is enabled, `false` otherwise
     pub fn search_replace_enabled(&self) -> bool {
         self.search_replace_enabled
+    }
+
+    /// Opens the search dialog programmatically.
+    ///
+    /// This is useful when wiring your own UI button instead of relying on
+    /// keyboard shortcuts.
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` that focuses the search input.
+    pub fn open_search_dialog(&mut self) -> iced::Task<Message> {
+        self.update(&Message::OpenSearch)
+    }
+
+    /// Opens the search-and-replace dialog programmatically.
+    ///
+    /// This is useful when wiring your own UI button instead of relying on
+    /// keyboard shortcuts.
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` that focuses the search input.
+    pub fn open_search_replace_dialog(&mut self) -> iced::Task<Message> {
+        self.update(&Message::OpenSearchReplace)
+    }
+
+    /// Closes the search dialog programmatically.
+    ///
+    /// # Returns
+    ///
+    /// A `Task<Message>` for any follow-up UI work.
+    pub fn close_search_dialog(&mut self) -> iced::Task<Message> {
+        self.update(&Message::CloseSearch)
     }
 
     /// Sets the line wrapping with builder pattern.
@@ -1019,6 +1409,53 @@ impl CodeEditor {
         self.focus_locked = false;
     }
 
+    /// Returns the screen position of the cursor.
+    ///
+    /// This method returns the (x, y) coordinates of the current cursor position
+    /// relative to the editor canvas, accounting for gutter width and line height.
+    ///
+    /// # Returns
+    ///
+    /// An `Option<iced::Point>` containing the cursor position, or `None` if
+    /// the cursor position cannot be determined.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs");
+    /// if let Some(point) = editor.cursor_screen_position() {
+    ///     println!("Cursor at: ({}, {})", point.x, point.y);
+    /// }
+    /// ```
+    pub fn cursor_screen_position(&self) -> Option<iced::Point> {
+        let (line, col) = self.cursor;
+        self.point_from_position(line, col)
+    }
+
+    /// Returns the current cursor position as (line, column).
+    ///
+    /// This method returns the logical cursor position in the buffer,
+    /// where line and column are both 0-indexed.
+    ///
+    /// # Returns
+    ///
+    /// A tuple `(line, column)` representing the cursor position.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use iced_code_editor::CodeEditor;
+    ///
+    /// let editor = CodeEditor::new("fn main() {}", "rs");
+    /// let (line, col) = editor.cursor_position();
+    /// println!("Cursor at line {}, column {}", line, col);
+    /// ```
+    pub fn cursor_position(&self) -> (usize, usize) {
+        self.cursor
+    }
+
     /// Returns the maximum content width across all lines, in pixels.
     ///
     /// Used to size the horizontal scrollbar when `wrap_enabled = false`.
@@ -1107,11 +1544,48 @@ impl CodeEditor {
             Some(VisualLinesCache { key, visual_lines: visual_lines.clone() });
         visual_lines
     }
+
+    /// Initiates a "Go to Definition" request for the symbol at the current cursor position.
+    ///
+    /// This method converts the current cursor coordinates into an LSP-compatible position
+    /// and delegates the request to the active `LspClient`, if one is attached.
+    pub fn lsp_request_definition(&mut self) {
+        let position = self.lsp_position_from_cursor();
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_definition(document, position);
+        }
+    }
+
+    /// Initiates a "Go to Definition" request for the symbol at the specified screen coordinates.
+    ///
+    /// This is typically used for mouse interactions (e.g., Ctrl+Click). It first resolves
+    /// the screen coordinates to a text position and then sends the request.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the request was successfully sent (i.e., a valid position was found and an LSP client is active),
+    /// `false` otherwise.
+    pub fn lsp_request_definition_at(&mut self, point: iced::Point) -> bool {
+        let Some(position) = self.lsp_position_from_point(point) else {
+            return false;
+        };
+        if let (Some(client), Some(document)) =
+            (self.lsp_client.as_mut(), self.lsp_document.as_ref())
+        {
+            client.request_definition(document, position);
+            return true;
+        }
+        false
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[test]
     fn test_compare_floats() {
@@ -1202,10 +1676,10 @@ mod tests {
     #[test]
     fn test_measure_text_width_control_chars() {
         // "\t\n" (2 chars)
-        // width = 0.0 (control chars have 0 width in this implementation)
+        // width = 4 * CHAR_WIDTH (tab) + 0 (newline)
         let text = "\t\n";
         let width = measure_text_width(text, FONT_SIZE, CHAR_WIDTH);
-        let expected = 0.0;
+        let expected = CHAR_WIDTH * TAB_WIDTH as f32;
         assert_eq!(
             compare_floats(width, expected),
             CmpOrdering::Equal,
@@ -1370,6 +1844,56 @@ mod tests {
             Rc::ptr_eq(&first, &second),
             "visual_lines_cached should reuse the cached Rc for identical keys"
         );
+    }
+
+    #[derive(Default)]
+    struct TestLspClient {
+        changes: Rc<RefCell<Vec<Vec<lsp::LspTextChange>>>>,
+    }
+
+    impl lsp::LspClient for TestLspClient {
+        fn did_change(
+            &mut self,
+            _document: &lsp::LspDocument,
+            changes: &[lsp::LspTextChange],
+        ) {
+            self.changes.borrow_mut().push(changes.to_vec());
+        }
+    }
+
+    #[test]
+    fn test_word_start_in_line() {
+        let line = "foo_bar baz";
+        assert_eq!(CodeEditor::word_start_in_line(line, 0), 0);
+        assert_eq!(CodeEditor::word_start_in_line(line, 2), 0);
+        assert_eq!(CodeEditor::word_start_in_line(line, 4), 0);
+        assert_eq!(CodeEditor::word_start_in_line(line, 7), 0);
+        assert_eq!(CodeEditor::word_start_in_line(line, 9), 8);
+    }
+
+    #[test]
+    fn test_enqueue_lsp_change_auto_flush() {
+        let changes = Rc::new(RefCell::new(Vec::new()));
+        let client = TestLspClient { changes: Rc::clone(&changes) };
+        let mut editor = CodeEditor::new("hello", "rs");
+        editor.attach_lsp(
+            Box::new(client),
+            lsp::LspDocument::new("file:///test.rs", "rust"),
+        );
+        editor.set_lsp_auto_flush(true);
+
+        editor.buffer.insert_char(0, 5, '!');
+        editor.enqueue_lsp_change();
+
+        let changes = changes.borrow();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].len(), 1);
+        let change = &changes[0][0];
+        assert_eq!(change.text, "!");
+        assert_eq!(change.range.start.line, 0);
+        assert_eq!(change.range.start.character, 5);
+        assert_eq!(change.range.end.line, 0);
+        assert_eq!(change.range.end.character, 5);
     }
 
     #[test]
