@@ -9,8 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
-
-## [0.5.3] - 2026-11-08
+## [0.5.3] - 2026-11-12
 
 ### Added
 
@@ -31,6 +30,8 @@ Nothing yet.
 
 ### Changed
 
+- Use a translucent theme accent for context-menu hover backgrounds, with a
+  stronger pressed state and softer rounded corners in light and dark themes.
 - `Home` now jumps to the first non-blank character of the line, and to column 0 when
   the cursor is already there ("smart Home"), as in most code editors.
 - chore(deps): `iced_aw` upgraded from 0.13 to 0.14 (still on `iced` 0.14).
