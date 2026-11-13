@@ -888,3 +888,6 @@ mod tests {
 
 #[cfg(test)]
 mod wrap_settings_tests;
+
+#[cfg(test)]
+mod indent_settings_tests;

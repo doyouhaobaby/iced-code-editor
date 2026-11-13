@@ -733,7 +733,10 @@ impl CodeEditor {
     /// assert_eq!(editor.indent_style(), IndentStyle::Spaces(2));
     /// ```
     pub fn set_indent_style(&mut self, style: IndentStyle) {
-        self.indent_style = style;
+        if self.indent_style != style {
+            self.indent_style = style;
+            self.content_cache.clear();
+        }
     }
 
     /// Returns the current indentation style.
