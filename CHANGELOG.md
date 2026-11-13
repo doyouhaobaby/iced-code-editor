@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.5.4] - 2026-11-14
+
+### Added
+
+- Add runtime `CodeEditor::set_wrap_column` and `CodeEditor::wrap_column` APIs.
+
+### Fixed
+
+- Invalidate text and overlay geometry when the wrap column changes, normalize
+  zero to one column, and reset horizontal scrolling while wrapping is enabled.
+- Invalidate cached indent guides when the indentation style changes.
+
+### Tests
+
+- Expand rendering and editing behavior coverage for nine editor settings,
+  including wrapping, indentation, and sticky configuration behavior.
+
 ## [0.5.3] - 2026-11-12
 
 ### Added
