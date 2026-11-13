@@ -1035,3 +1035,7 @@ mod tests {
         assert_eq!(style.horizontal_rail.background, expected_rail.background);
     }
 }
+
+#[cfg(test)]
+#[path = "../option_sticky_tests.rs"]
+mod option_sticky_tests;

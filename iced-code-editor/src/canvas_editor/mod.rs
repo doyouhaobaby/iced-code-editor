@@ -891,3 +891,6 @@ mod wrap_settings_tests;
 
 #[cfg(test)]
 mod indent_settings_tests;
+
+#[cfg(test)]
+mod option_behavior_tests;
