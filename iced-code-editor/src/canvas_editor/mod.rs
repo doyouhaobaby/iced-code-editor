@@ -885,3 +885,6 @@ mod tests {
         assert!(!editor.is_dialog_open());
     }
 }
+
+#[cfg(test)]
+mod wrap_settings_tests;
