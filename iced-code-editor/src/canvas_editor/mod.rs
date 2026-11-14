@@ -894,3 +894,6 @@ mod indent_settings_tests;
 
 #[cfg(test)]
 mod option_behavior_tests;
+
+#[cfg(test)]
+mod unicode_render_tests;

@@ -382,10 +382,13 @@ impl CodeEditor {
             } else {
                 expand_tabs(content, TAB_WIDTH).into_owned()
             };
+            // Unicode headers need the same fallback as the canvas text layer.
+            let span_font =
+                if content.is_ascii() { font } else { iced::Font::DEFAULT };
             code = code.push(
                 text(content)
                     .size(font_size)
-                    .font(font)
+                    .font(span_font)
                     .wrapping(text::Wrapping::None)
                     .style(move |_| text::Style { color: Some(color) }),
             );
