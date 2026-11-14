@@ -178,9 +178,14 @@ pub fn view<'a>(
                 let mut style = text_editor::default(theme, status);
                 style.background = iced::Color::TRANSPARENT.into();
                 style.border.width = 0.0;
+                style.placeholder = theme
+                    .extended_palette()
+                    .background
+                    .base
+                    .text
+                    .scale_alpha(0.55);
                 style
             })
-            .font(iced::Font::MONOSPACE)
             .size(12)
             .padding(8)
             .height(76)
@@ -190,12 +195,17 @@ pub fn view<'a>(
             .id(state.search_input_id.clone())
             .on_input(Message::SearchQueryChanged)
             .on_submit(Message::FindNext)
-            .font(iced::Font::MONOSPACE)
             .size(12)
             .padding([4, 8])
             .style(|theme, status| {
                 let mut style = text_input::default(theme, status);
                 style.border.width = 0.0;
+                style.placeholder = theme
+                    .extended_palette()
+                    .background
+                    .base
+                    .text
+                    .scale_alpha(0.55);
                 style.background = iced::Color::TRANSPARENT.into();
                 style
             })
@@ -303,9 +313,14 @@ pub fn view<'a>(
                     let mut style = text_editor::default(theme, status);
                     style.background = iced::Color::TRANSPARENT.into();
                     style.border.width = 0.0;
+                    style.placeholder = theme
+                        .extended_palette()
+                        .background
+                        .base
+                        .text
+                        .scale_alpha(0.55);
                     style
                 })
-                .font(iced::Font::MONOSPACE)
                 .size(12)
                 .padding(8)
                 .height(76)
@@ -315,12 +330,17 @@ pub fn view<'a>(
                 .id(state.replace_input_id.clone())
                 .on_input(Message::ReplaceQueryChanged)
                 .on_submit(Message::ReplaceNext)
-                .font(iced::Font::MONOSPACE)
                 .size(12)
                 .padding([4, 8])
                 .style(|theme, status| {
                     let mut style = text_input::default(theme, status);
                     style.border.width = 0.0;
+                    style.placeholder = theme
+                        .extended_palette()
+                        .background
+                        .base
+                        .text
+                        .scale_alpha(0.55);
                     style.background = iced::Color::TRANSPARENT.into();
                     style
                 })
