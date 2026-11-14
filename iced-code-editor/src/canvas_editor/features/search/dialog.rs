@@ -178,6 +178,12 @@ pub fn view<'a>(
                 let mut style = text_editor::default(theme, status);
                 style.background = iced::Color::TRANSPARENT.into();
                 style.border.width = 0.0;
+                style.placeholder = theme
+                    .extended_palette()
+                    .background
+                    .base
+                    .text
+                    .scale_alpha(0.55);
                 style
             })
             .font(iced::Font::MONOSPACE)
@@ -196,6 +202,12 @@ pub fn view<'a>(
             .style(|theme, status| {
                 let mut style = text_input::default(theme, status);
                 style.border.width = 0.0;
+                style.placeholder = theme
+                    .extended_palette()
+                    .background
+                    .base
+                    .text
+                    .scale_alpha(0.55);
                 style.background = iced::Color::TRANSPARENT.into();
                 style
             })
@@ -303,6 +315,12 @@ pub fn view<'a>(
                     let mut style = text_editor::default(theme, status);
                     style.background = iced::Color::TRANSPARENT.into();
                     style.border.width = 0.0;
+                    style.placeholder = theme
+                        .extended_palette()
+                        .background
+                        .base
+                        .text
+                        .scale_alpha(0.55);
                     style
                 })
                 .font(iced::Font::MONOSPACE)
@@ -321,6 +339,12 @@ pub fn view<'a>(
                 .style(|theme, status| {
                     let mut style = text_input::default(theme, status);
                     style.border.width = 0.0;
+                    style.placeholder = theme
+                        .extended_palette()
+                        .background
+                        .base
+                        .text
+                        .scale_alpha(0.55);
                     style.background = iced::Color::TRANSPARENT.into();
                     style
                 })
