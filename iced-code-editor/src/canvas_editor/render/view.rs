@@ -1,7 +1,6 @@
 //! Iced UI view and rendering logic.
 
 use iced::Size;
-use iced::advanced::input_method;
 use iced::alignment;
 use iced::mouse;
 use iced::widget::canvas::Canvas;
@@ -497,14 +496,9 @@ impl CodeEditor {
     fn create_ime_layer(&self, cursor_rect: Rectangle) -> Element<'_, Message> {
         let ime_enabled = self.is_focused() && self.has_canvas_focus;
 
-        let preedit =
-            self.ime_preedit.as_ref().map(|p| input_method::Preedit {
-                content: p.content.clone(),
-                selection: p.selection.clone(),
-                text_size: None,
-            });
-
-        let ime_layer = ImeRequester::new(ime_enabled, cursor_rect, preedit);
+        // The canvas draws preedit on the spot. Supplying it here would also
+        // create Iced's over-the-spot paragraph with unbounded layout.
+        let ime_layer = ImeRequester::new(ime_enabled, cursor_rect, None);
         iced::Element::new(ime_layer)
     }
 
@@ -717,6 +711,50 @@ pub(crate) fn scrollable_rail(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ime_uses_canvas_preedit_without_a_duplicate_runtime_overlay()
+    -> Result<(), &'static str> {
+        use iced::advanced::input_method::InputMethod;
+        use iced::advanced::{Layout, Shell, layout, renderer::Headless};
+
+        let renderer = iced::futures::executor::block_on(iced::Renderer::new(
+            iced::Font::DEFAULT,
+            iced::Pixels(13.0),
+            Some("tiny-skia"),
+        ))
+        .ok_or("headless software renderer unavailable")?;
+        let mut editor = CodeEditor::new("", "txt");
+        editor.focus_for_test();
+        let _ = editor.handle_ime_preedit_msg("中文", &Some(0..3));
+        let cursor =
+            Rectangle::new(iced::Point::new(40.0, 20.0), Size::new(2.0, 18.0));
+        let mut layer = editor.create_ime_layer(cursor);
+        let mut tree = iced::advanced::widget::Tree::new(&layer);
+        let node = layer.as_widget_mut().layout(
+            &mut tree,
+            &renderer,
+            &layout::Limits::new(Size::ZERO, Size::new(500.0, 300.0)),
+        );
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        layer.as_widget_mut().update(
+            &mut tree,
+            &iced::Event::Window(iced::window::Event::RedrawRequested(
+                iced::time::Instant::now(),
+            )),
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &renderer,
+            &mut iced::advanced::clipboard::Null,
+            &mut shell,
+            &Rectangle::with_size(Size::new(500.0, 300.0)),
+        );
+        assert!(matches!(shell.input_method(), InputMethod::Enabled {
+            cursor: requested, preedit: None, ..
+        } if *requested == cursor));
+        Ok(())
+    }
 
     type InputState = iced::widget::text_input::State<
         <iced::Renderer as iced::advanced::text::Renderer>::Paragraph,

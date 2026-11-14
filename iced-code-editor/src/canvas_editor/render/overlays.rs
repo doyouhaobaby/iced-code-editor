@@ -493,14 +493,16 @@ impl CodeEditor {
                     }
 
                     // 3. Draw preedit text itself
-                    frame.fill_text(canvas::Text {
-                        content: preedit.content.clone(),
-                        position: Point::new(cursor_x, cursor_y + 2.0),
-                        color: self.style.text_color,
-                        size: ctx.font_size.into(),
-                        font: ctx.font,
-                        ..canvas::Text::default()
-                    });
+                    // Use the same bounded layout and Unicode font fallback
+                    // as committed text. The default canvas text width is
+                    // infinite, which can overflow cosmic-text's glyph cache.
+                    super::text::draw_text_runs(
+                        frame,
+                        &preedit.content,
+                        Point::new(cursor_x, cursor_y + 2.0),
+                        self.style.text_color,
+                        ctx,
+                    );
 
                     // 4. Draw bottom underline (IME state indicator)
                     frame.fill_rectangle(

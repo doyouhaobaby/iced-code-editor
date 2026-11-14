@@ -23,7 +23,7 @@ use crate::canvas_editor::{
 
 // Keep ASCII on the configured fixed-pitch font. Unicode needs font fallback
 // and advanced shaping; preserve the editor's cell-based positions between runs.
-fn draw_text_runs(
+pub(super) fn draw_text_runs(
     frame: &mut canvas::Frame,
     content: &str,
     mut position: Point,
