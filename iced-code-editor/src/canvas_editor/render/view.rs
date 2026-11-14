@@ -560,24 +560,6 @@ impl CodeEditor {
         let ime_layer = self.create_ime_layer(cursor_rect);
         editor_stack = editor_stack.push(ime_layer);
 
-        // Add search dialog overlay if open
-        if self.search_state.is_open {
-            let search_dialog =
-                search_dialog::view(&self.search_state, &self.translations);
-
-            // Position the dialog in top-right corner with 20px margin
-            let positioned_dialog = container(
-                Row::new()
-                    .push(Space::new().width(Length::Fill))
-                    .push(search_dialog),
-            )
-            .padding(20)
-            .width(Length::Fill)
-            .height(Length::Shrink);
-
-            editor_stack = editor_stack.push(positioned_dialog);
-        }
-
         // Add the compact go-to-line dialog in the top center.
         if self.goto_line_state.is_open {
             let goto_line_dialog = goto_line_dialog::view(
@@ -658,6 +640,23 @@ impl CodeEditor {
             } else {
                 editor_container.into()
             }
+        };
+
+        let editor_body = if self.search_state.is_open {
+            Column::new()
+                .push(search_dialog::view(
+                    &self.search_state,
+                    &self.translations,
+                    !self.vim_enabled,
+                    !self.goto_line_state.is_open
+                        && !self.command_palette_state.is_open,
+                ))
+                .push(editor_body)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else {
+            editor_body
         };
 
         if self.vim_enabled {
@@ -1080,3 +1079,7 @@ mod tests {
 #[cfg(test)]
 #[path = "../option_sticky_tests.rs"]
 mod option_sticky_tests;
+
+#[cfg(test)]
+#[path = "search_focus_tests.rs"]
+mod search_focus_tests;
