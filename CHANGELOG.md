@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.5.5] - 2026-11-14
+
+### Added
+
+- Add whole-word and regular-expression search, capture-group replacements,
+  multiline search and replacement, and selection of all search results.
+- Add platform-specific search shortcuts, translated tooltips, and vector toolbar icons.
+
+### Fixed
+
+- Preserve undo history and document focus during multiline replacements and bulk selections.
+- Fix Chinese canvas font fallback and glyph coordinate overflow.
+- Bound IME preedit rendering and validate Unicode selection ranges.
+
+### Tests
+
+- Add regression coverage for search matching, replacement, toolbar layout,
+  document focus, Unicode rendering, and IME selections.
+
 ## [0.5.4] - 2026-11-14
 
 ### Added
