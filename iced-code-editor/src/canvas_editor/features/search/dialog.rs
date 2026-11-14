@@ -186,7 +186,6 @@ pub fn view<'a>(
                     .scale_alpha(0.55);
                 style
             })
-            .font(iced::Font::MONOSPACE)
             .size(12)
             .padding(8)
             .height(76)
@@ -196,7 +195,6 @@ pub fn view<'a>(
             .id(state.search_input_id.clone())
             .on_input(Message::SearchQueryChanged)
             .on_submit(Message::FindNext)
-            .font(iced::Font::MONOSPACE)
             .size(12)
             .padding([4, 8])
             .style(|theme, status| {
@@ -323,7 +321,6 @@ pub fn view<'a>(
                         .scale_alpha(0.55);
                     style
                 })
-                .font(iced::Font::MONOSPACE)
                 .size(12)
                 .padding(8)
                 .height(76)
@@ -333,7 +330,6 @@ pub fn view<'a>(
                 .id(state.replace_input_id.clone())
                 .on_input(Message::ReplaceQueryChanged)
                 .on_submit(Message::ReplaceNext)
-                .font(iced::Font::MONOSPACE)
                 .size(12)
                 .padding([4, 8])
                 .style(|theme, status| {
