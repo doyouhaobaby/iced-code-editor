@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.5.6] - 2026-11-14
+
+### Fixed
+
+- Improve search and replace placeholder contrast in light and dark themes.
+- Use the application font for search and replace inputs to improve character rendering.
+
 ## [0.5.5] - 2026-11-14
 
 ### Added
